@@ -14,7 +14,7 @@ AI 智能路由引擎 — LLM Tool Calling 驱动的意图识别与引擎调度
 """
 import json
 import os
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from openai import AsyncOpenAI
 
@@ -160,7 +160,7 @@ class AIRouter:
         else:
             return {"error": f"未知工具: {name}"}
 
-    async def chat(self, user_message: str, history: list[dict] | None = None) -> str:
+    async def chat(self, user_message: str, history: Optional[list] = None) -> str:
         """非流式对话（完整响应）"""
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         if history:
@@ -202,7 +202,7 @@ class AIRouter:
         return msg.content or ""
 
     async def chat_stream(
-        self, user_message: str, history: list[dict] | None = None
+        self, user_message: str, history: Optional[list] = None
     ) -> AsyncGenerator[str, None]:
         """SSE 流式对话"""
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]

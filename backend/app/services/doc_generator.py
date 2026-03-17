@@ -96,7 +96,7 @@ class DocGenerator:
 
         return DocGenerateResult(
             project_id=project_id,
-            project_name=project.name,
+            project_name=project.face_name,
             file_path=file_path,
             total_chapters=len(chapters),
             total_warnings=total_warnings,
@@ -160,7 +160,7 @@ class DocGenerator:
 
         # 第一章 概况
         overview_lines = [
-            f"项目名称：{project.name}",
+            f"项目名称：{project.face_name}",
             f"矿井名称：{getattr(project, 'mine_name', '—')}",
         ]
         for field, label in PARAM_LABELS.items():
@@ -238,7 +238,7 @@ class DocGenerator:
                 "一、顶板管理\n"
                 "  掘进工作面应当严格执行敲帮问顶制度...\n\n"
                 "二、防治水措施\n"
-                "  坚持"有疑必探、先探后掘"的原则...\n\n"
+                '  坚持"有疑必探、先探后掘"的原则...\n\n'
                 "三、瓦斯管理\n"
                 "  严格执行瓦斯检查制度，瓦斯超限必须停止作业...\n\n"
                 "四、防尘措施\n"
@@ -266,7 +266,7 @@ class DocGenerator:
 
         title = doc.add_paragraph()
         title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-        run = title.add_run(f"{project.name}")
+        run = title.add_run(f"{project.face_name}")
         run.font.size = Pt(22)
         run.font.bold = True
 
@@ -321,7 +321,7 @@ class DocGenerator:
         )
         os.makedirs(output_dir, exist_ok=True)
 
-        safe_name = project.name.replace("/", "_").replace(" ", "_")
+        safe_name = project.face_name.replace("/", "_").replace(" ", "_")
         filename = f"{safe_name}_作业规程_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
         file_path = os.path.join(output_dir, filename)
 

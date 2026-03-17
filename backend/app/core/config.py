@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     # --- CORS ---
     CORS_ORIGINS: List[str] = ["http://localhost:3000"]
 
+    # --- AI / LLM ---
+    OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = ""
+    AI_MODEL: str = "gpt-4o-mini"
+    GEMINI_API_KEY: str = ""
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

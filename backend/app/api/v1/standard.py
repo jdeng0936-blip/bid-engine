@@ -3,6 +3,7 @@
 
 所有接口强制 JWT 认证 + tenant_id 隔离。
 """
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,8 +30,8 @@ router = APIRouter(prefix="/standards", tags=["标准库"])
 async def list_documents(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    doc_type: str | None = Query(None, description="文档类型筛选"),
-    title: str | None = Query(None, description="标题模糊搜索"),
+    doc_type: Optional[str] = Query(None, description="文档类型筛选"),
+    title: Optional[str] = Query(None, description="标题模糊搜索"),
     tenant_id: int = Depends(get_tenant_id),
     session: AsyncSession = Depends(get_async_session),
 ):
