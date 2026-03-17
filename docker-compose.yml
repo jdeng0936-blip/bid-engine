@@ -1,5 +1,6 @@
 # Docker Compose 编排 — 掘进工作面规程智能生成平台
 # 一键启动：docker compose up -d
+name: excavation-platform
 
 services:
   # --- PostgreSQL 16 + pgvector ---
@@ -11,8 +12,8 @@ services:
       POSTGRES_DB: excavation_platform
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-    ports:
-      - "5433:5432"
+    expose:
+      - "5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -25,8 +26,8 @@ services:
     image: redis/redis-stack-server:latest
     container_name: excavation-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
     volumes:
       - redis_data:/data
 
@@ -38,8 +39,15 @@ services:
     container_name: excavation-api
     restart: unless-stopped
     env_file: ./backend/.env
+    # 容器内覆盖：数据库/Redis 使用服务名而非 localhost
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/excavation_platform"
+      REDIS_URL: "redis://redis:6379/0"
+      CORS_ORIGINS: '["http://localhost","http://localhost:3000","http://localhost:80"]'
     expose:
       - "8000"
+    volumes:
+      - api_storage:/app/storage
     depends_on:
       postgres:
         condition: service_healthy
@@ -51,10 +59,13 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # 构建时注入：浏览器端 API 通过 Nginx 反代（相对路径）
+        NEXT_PUBLIC_API_URL: "/api/v1"
     container_name: excavation-web
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: http://api:8000/api/v1
+      NEXT_PUBLIC_API_URL: "/api/v1"
     expose:
       - "3000"
     depends_on:
@@ -76,3 +87,4 @@ services:
 volumes:
   pg_data:
   redis_data:
+  api_storage:

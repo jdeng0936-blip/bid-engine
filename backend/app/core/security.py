@@ -5,12 +5,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt as _bcrypt
 
 from app.core.config import settings
-
-# 密码哈希上下文（bcrypt）
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # JWT 常量
 ALGORITHM = "HS256"
@@ -18,12 +15,12 @@ ALGORITHM = "HS256"
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """校验明文密码与哈希"""
-    return pwd_context.verify(plain_password, hashed_password)
+    return _bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
 
 
 def get_password_hash(password: str) -> str:
     """生成 bcrypt 哈希"""
-    return pwd_context.hash(password)
+    return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
 
 
 def create_access_token(
