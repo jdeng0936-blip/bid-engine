@@ -83,14 +83,14 @@ export default function DashboardPage() {
     { title: "规程项目", value: stats.projects, icon: FileText, desc: "已创建", href: "/dashboard/projects", color: "text-blue-600" },
     { title: "标准规范", value: stats.standards, icon: BookOpen, desc: "已录入", href: "/dashboard/standards", color: "text-emerald-600" },
     { title: "编制规则", value: stats.rules, icon: Settings2, desc: "条规则", href: "/dashboard/rules", color: "text-purple-600" },
-    { title: "计算校验", value: "3 种", icon: Calculator, desc: "支护/通风/循环", href: "/dashboard/calc", color: "text-orange-600" },
+    { title: "计算校验", value: "6 种", icon: Calculator, desc: "支护/通风/循环/锚索/合规/冲突", href: "/dashboard/calc", color: "text-orange-600" },
   ];
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-slate-800 dark:text-white">工作台</h2>
-        <Link href="/dashboard/projects">
+        <Link href="/dashboard/projects/new">
           <span className="flex items-center gap-1 text-sm text-blue-600 hover:underline cursor-pointer">
             新建项目 <ArrowUpRight className="h-3.5 w-3.5" />
           </span>

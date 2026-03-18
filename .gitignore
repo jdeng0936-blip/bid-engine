@@ -34,3 +34,4 @@ generated/*.docx
 
 # 日志
 *.log
+backend/storage/outputs/

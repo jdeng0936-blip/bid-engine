@@ -12,8 +12,8 @@ services:
       POSTGRES_DB: excavation_platform
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-    expose:
-      - "5432"
+    ports:
+      - "127.0.0.1:5433:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -26,8 +26,8 @@ services:
     image: redis/redis-stack-server:latest
     container_name: excavation-redis
     restart: unless-stopped
-    expose:
-      - "6379"
+    ports:
+      - "127.0.0.1:6380:6379"
     volumes:
       - redis_data:/data
 

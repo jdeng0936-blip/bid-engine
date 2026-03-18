@@ -1,12 +1,16 @@
 """
 AI 对话 API 路由 — SSE 流式输出 + 非流式
 
-架构红线：单向流式输出用 SSE
+架构红线：
+  - 单向流式输出用 SSE
+  - AIRouter 需要 DB session 以支持标准库语义检索
 """
 import json
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import get_async_session
 from app.core.deps import get_current_user_payload
 from app.schemas.common import ApiResponse
 from app.schemas.ai import ChatRequest, ChatResponse
@@ -14,29 +18,21 @@ from app.services.ai_router import AIRouter
 
 router = APIRouter(prefix="/ai", tags=["AI 智能路由"])
 
-# 复用单例
-_ai_router = None
-
-
-def get_ai_router() -> AIRouter:
-    global _ai_router
-    if _ai_router is None:
-        _ai_router = AIRouter()
-    return _ai_router
-
 
 @router.post("/chat")
 async def ai_chat(
     body: ChatRequest,
     payload: dict = Depends(get_current_user_payload),
+    session: AsyncSession = Depends(get_async_session),
 ):
-    """AI 对话 — 自然语言驱动计算引擎
+    """AI 对话 — 自然语言驱动计算引擎 + 标准库语义检索
 
     支持两种模式：
     - stream=true → SSE 流式输出（默认）
     - stream=false → 完整 JSON 响应
     """
-    ai = get_ai_router()
+    # 每次请求创建新的 AIRouter 实例，注入 DB session
+    ai = AIRouter(session=session)
 
     # 构建历史消息
     history = [{"role": m.role, "content": m.content} for m in body.history]

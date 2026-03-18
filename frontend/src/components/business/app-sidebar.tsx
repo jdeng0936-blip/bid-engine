@@ -13,6 +13,7 @@ import {
   LogOut,
   Bot,
   Library,
+  FileOutput,
 } from "lucide-react";
 import { useAuthStore } from "@/lib/stores/auth-store";
 
@@ -20,6 +21,7 @@ import { useAuthStore } from "@/lib/stores/auth-store";
 const NAV_ITEMS = [
   { href: "/dashboard", label: "工作台", icon: LayoutDashboard },
   { href: "/dashboard/projects", label: "规程项目", icon: FileText },
+  { href: "/dashboard/documents", label: "文档中心", icon: FileOutput },
   { href: "/dashboard/standards", label: "标准库", icon: BookOpen },
   { href: "/dashboard/rules", label: "规则管理", icon: Settings2 },
   { href: "/dashboard/knowledge", label: "知识库", icon: Library },

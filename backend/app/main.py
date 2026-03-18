@@ -56,7 +56,7 @@ async def _init_db():
             )
             admin_role = role_result.scalar_one_or_none()
             if not admin_role:
-                admin_role = SysRole(name="管理员", description="系统管理员")
+                admin_role = SysRole(name="管理员", description="系统管理员", tenant_id=1, created_by=0)
                 session.add(admin_role)
                 await session.flush()
 

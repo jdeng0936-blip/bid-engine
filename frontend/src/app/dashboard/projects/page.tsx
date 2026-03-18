@@ -151,9 +151,11 @@ export default function ProjectsPage() {
             共 {projects.length} 个项目
           </p>
         </div>
-        <Button className="gap-2" onClick={() => setShowCreate(!showCreate)}>
-          <Plus className="h-4 w-4" />新建项目
-        </Button>
+        <Link href="/dashboard/projects/new">
+          <Button className="gap-2">
+            <Plus className="h-4 w-4" />新建项目
+          </Button>
+        </Link>
       </div>
 
       {/* 搜索 */}

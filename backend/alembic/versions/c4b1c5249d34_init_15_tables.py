@@ -93,12 +93,22 @@ def upgrade() -> None:
     sa.Column('company', sa.String(length=200), nullable=True, comment='所属公司'),
     sa.Column('gas_level', sa.String(length=20), nullable=True, comment='瓦斯等级(低/高/突出)'),
     sa.Column('address', sa.String(length=300), nullable=True, comment='矿井地址'),
+    sa.Column('contact', sa.String(length=50), nullable=True, comment='联系人'),
+    sa.Column('phone', sa.String(length=20), nullable=True, comment='联系电话'),
+    sa.Column('tenant_id', sa.Integer(), nullable=False, comment='租户ID（矿井ID）'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='创建人ID'),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False, comment='创建时间'),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False, comment='更新时间'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('sys_role',
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
     sa.Column('name', sa.String(length=50), nullable=False, comment='角色名'),
     sa.Column('description', sa.String(length=200), nullable=True, comment='角色描述'),
+    sa.Column('tenant_id', sa.Integer(), nullable=False, comment='租户ID（矿井ID）'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='创建人ID'),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False, comment='创建时间'),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False, comment='更新时间'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('name')
     )

@@ -3,6 +3,7 @@
 """
 from sqlalchemy import String, Integer, Text, Boolean, Date, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from pgvector.sqlalchemy import Vector
 
 from app.models.base import Base, AuditMixin
 
@@ -23,7 +24,7 @@ class StdDocument(AuditMixin, Base):
 
 
 class StdClause(Base):
-    """规范条款（结构化拆解）"""
+    """规范条款（结构化拆解 + 向量检索）"""
     __tablename__ = "std_clause"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -33,6 +34,8 @@ class StdClause(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=True, comment="条款标题")
     content: Mapped[str] = mapped_column(Text, nullable=True, comment="条款正文")
     level: Mapped[int] = mapped_column(Integer, default=0, comment="层级深度")
+    # pgvector 向量列 — 用于语义检索
+    embedding = mapped_column(Vector(1536), nullable=True, comment="文本嵌入向量(1536维)")
 
     document = relationship("StdDocument", back_populates="clauses")
 

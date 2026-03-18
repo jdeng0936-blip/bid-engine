@@ -7,6 +7,11 @@ import pytest
 @pytest.mark.asyncio
 async def test_create_project(async_client, auth_headers):
     """创建项目 → 200 + mine_name 正确返回"""
+    # 前置准备：创建一个矿井以供给项目的外键依赖
+    await async_client.post("/api/v1/system/mines", json={
+        "name": "测试矿井-1", "design_capacity": 1.2
+    }, headers=auth_headers)
+
     resp = await async_client.post("/api/v1/projects", json={
         "face_name": "pytest-3301回风巷",
         "mine_id": 1,
