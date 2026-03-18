@@ -33,7 +33,7 @@ export default function DashboardPage() {
         // 并行请求各模块数据
         const [projRes, stdRes] = await Promise.allSettled([
           api.get("/projects", { params: { page: 1, page_size: 5 } }),
-          api.get("/standards/documents", { params: { page: 1, page_size: 1 } }),
+          api.get("/standards", { params: { page: 1, page_size: 1 } }),
         ]);
 
         const projData = projRes.status === "fulfilled" ? projRes.value.data?.data : null;

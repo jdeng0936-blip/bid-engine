@@ -23,10 +23,16 @@ const STATUS_STYLE: Record<string, string> = {
   草稿: "bg-slate-200 text-slate-600",
 };
 
+interface Mine {
+  id: number;
+  name: string;
+}
+
 interface Project {
   id: number;
   face_name: string;
   mine_name: string;
+  mine_id: number;
   status: string;
   rock_class?: string;
   gas_level?: string;
@@ -41,12 +47,13 @@ interface Project {
 export default function ProjectsPage() {
   const [search, setSearch] = useState("");
   const [projects, setProjects] = useState<Project[]>([]);
+  const [mines, setMines] = useState<Mine[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({
     face_name: "",
-    mine_name: "",
+    mine_id: 0,
     dig_method: "综掘",
     rock_class: "III",
     gas_level: "低瓦斯",
@@ -54,13 +61,32 @@ export default function ProjectsPage() {
     section_height: "3.2",
   });
 
+  // 加载矿井列表（用于下拉选择器）
+  const fetchMines = useCallback(async () => {
+    try {
+      const res = await api.get("/system/mines", { params: { page: 1, page_size: 100 } });
+      const data = res.data?.data;
+      // 兼容分页格式 { items: [...] } 和直接数组格式
+      const list = Array.isArray(data) ? data : (data?.items || []);
+      setMines(list);
+      // 默认选第一个矿井
+      if (list.length > 0 && form.mine_id === 0) {
+        setForm(prev => ({ ...prev, mine_id: list[0].id }));
+      }
+    } catch {
+      // 静默处理
+    }
+  }, []);
+
   // 加载项目列表
   const fetchProjects = useCallback(async () => {
     try {
       const res = await api.get("/projects", {
         params: { page: 1, page_size: 50 },
       });
-      setProjects(res.data?.data?.items || []);
+      // 兼容分页格式和直接数组格式
+      const data = res.data?.data;
+      setProjects(Array.isArray(data) ? data : (data?.items || []));
     } catch {
       // 发生错误使用空列表
     } finally {
@@ -69,21 +95,25 @@ export default function ProjectsPage() {
   }, []);
 
   useEffect(() => {
+    fetchMines();
     fetchProjects();
-  }, [fetchProjects]);
+  }, [fetchMines, fetchProjects]);
 
   // 创建项目
   const handleCreate = async () => {
-    if (!form.face_name) return;
+    if (!form.face_name || !form.mine_id) {
+      alert("请填写项目名称并选择矿井");
+      return;
+    }
     setCreating(true);
     try {
       await api.post("/projects", {
         face_name: form.face_name,
-        mine_name: form.mine_name || "—",
+        mine_id: form.mine_id,
         dig_method: form.dig_method,
       });
       setShowCreate(false);
-      setForm({ face_name: "", mine_name: "", dig_method: "综掘", rock_class: "III", gas_level: "低瓦斯", section_width: "4.5", section_height: "3.2" });
+      setForm({ face_name: "", mine_id: mines[0]?.id || 0, dig_method: "综掘", rock_class: "III", gas_level: "低瓦斯", section_width: "4.5", section_height: "3.2" });
       fetchProjects();
     } catch (err: any) {
       alert("创建失败: " + (err.response?.data?.detail || err.message));
@@ -153,12 +183,19 @@ export default function ProjectsPage() {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium">矿井名称</label>
-                <Input
-                  placeholder="如：某某煤矿"
-                  value={form.mine_name}
-                  onChange={(e) => setForm({ ...form, mine_name: e.target.value })}
-                />
+                <label className="mb-1 block text-xs font-medium">选择矿井 *</label>
+                <select
+                  className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  value={form.mine_id}
+                  onChange={(e) => setForm({ ...form, mine_id: Number(e.target.value) })}
+                >
+                  {mines.length === 0 && (
+                    <option value={0}>暂无矿井，请先在系统管理中添加</option>
+                  )}
+                  {mines.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium">掘进方式</label>

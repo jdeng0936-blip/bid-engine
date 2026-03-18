@@ -52,7 +52,7 @@ export default function StandardsPage() {
       const params: any = { page: 1, page_size: 100 };
       if (activeType !== "全部") params.doc_type = activeType;
       if (searchTerm) params.title = searchTerm;
-      const res = await api.get("/standards/documents", { params });
+      const res = await api.get("/standards", { params });
       setDocs(res.data?.data?.items || []);
     } catch {
       // 静默处理
@@ -71,7 +71,7 @@ export default function StandardsPage() {
     if (!form.title) return;
     setCreating(true);
     try {
-      await api.post("/standards/documents", form);
+      await api.post("/standards", form);
       setShowCreate(false);
       setForm({ title: "", doc_type: "技术规范", version: "" });
       fetchDocs();
@@ -86,7 +86,7 @@ export default function StandardsPage() {
   const handleDelete = async (id: number) => {
     if (!confirm("确认删除？")) return;
     try {
-      await api.delete(`/standards/documents/${id}`);
+      await api.delete(`/standards/${id}`);
       fetchDocs();
     } catch {
       alert("删除失败");
