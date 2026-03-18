@@ -18,6 +18,8 @@ from app.models.rule import *  # noqa: F401,F403
 from app.models.document import *  # noqa: F401,F403
 from app.models.mine import *  # noqa: F401,F403
 from app.models.drawing import *  # noqa: F401,F403
+from app.models.audit_log import *  # noqa: F401,F403
+from app.models.dict_item import *  # noqa: F401,F403
 
 from app.api.v1.health import router as health_router
 from app.api.v1.auth import router as auth_router
@@ -30,6 +32,7 @@ from app.api.v1.doc import router as doc_router
 from app.api.v1.ai import router as ai_router
 from app.api.v1.knowledge import router as knowledge_router
 from app.api.v1.drawing import router as drawing_router
+from app.api.v1.system import router as system_router
 
 
 async def _init_db():
@@ -115,7 +118,5 @@ app.include_router(doc_router, prefix="/api/v1")
 app.include_router(ai_router, prefix="/api/v1")
 app.include_router(knowledge_router, prefix="/api/v1")
 app.include_router(drawing_router, prefix="/api/v1")
-
-# TODO: 后续逐步注册
-# app.include_router(system_router, prefix="/api/v1")
+app.include_router(system_router, prefix="/api/v1")
 

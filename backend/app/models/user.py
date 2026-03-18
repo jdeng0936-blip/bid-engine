@@ -21,7 +21,7 @@ class SysUser(AuditMixin, Base):
     role = relationship("SysRole", back_populates="users", lazy="selectin")
 
 
-class SysRole(Base):
+class SysRole(AuditMixin, Base):
     """系统角色表"""
     __tablename__ = "sys_role"
 
