@@ -130,11 +130,16 @@ frontend/
 ## 🧪 测试
 
 ```bash
-cd backend
-source venv/bin/activate
+# ===== 后端 (79 用例) =====
+cd backend && source venv/bin/activate
 python -m pytest tests/ -q          # 全量运行
 python -m pytest tests/ -q -x       # 遇到第一个失败即停止
 python -m pytest tests/ -v -k "calc" # 只跑计算引擎测试
+
+# ===== 前端 (5 用例) =====
+cd frontend
+npm test                             # 全量运行
+npm run test:watch                   # 监听模式（改代码自动重跑）
 ```
 
 ## 📊 API 概览
