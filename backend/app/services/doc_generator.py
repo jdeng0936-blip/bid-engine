@@ -254,16 +254,16 @@ class DocGenerator:
 
     async def _ai_polish_content(self, chapters: list[ChapterContent], params: dict) -> list[ChapterContent]:
         """AI 深度润色长尾章节内容 (例如：安全技术措施)"""
-        import os
+        from app.core.config import settings
         from openai import AsyncOpenAI
-        
-        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("GEMINI_API_KEY", "")
-        base_url = os.getenv("OPENAI_BASE_URL")
-        model = os.getenv("AI_MODEL", "gpt-4o-mini")
-        
+
+        api_key = settings.OPENAI_API_KEY or settings.GEMINI_API_KEY
+        base_url = settings.OPENAI_BASE_URL or None
+        model = settings.AI_MODEL
+
         if not api_key:
             return chapters  # 降级：无大模型配置时原样返回
-            
+
         client_kwargs = {"api_key": api_key}
         if base_url:
             client_kwargs["base_url"] = base_url
