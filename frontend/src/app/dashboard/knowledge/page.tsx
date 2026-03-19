@@ -56,6 +56,8 @@ export default function KnowledgePage() {
   // 数据
   const [cases, setCases] = useState<Case[]>([]);
   const [snippets, setSnippets] = useState<Snippet[]>([]);
+  const [snippetPage, setSnippetPage] = useState(1);
+  const PAGE_SIZE = 50;
   const [templates, setTemplates] = useState<Template[]>([]);
   const [expandedSnippet, setExpandedSnippet] = useState<number | null>(null);
 
@@ -336,7 +338,7 @@ export default function KnowledgePage() {
       {/* 搜索 */}
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-        <Input className="pl-10" placeholder="搜索..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        <Input className="pl-10" placeholder="搜索..." value={search} onChange={(e) => { setSearch(e.target.value); setSnippetPage(1); }} />
       </div>
 
       {/* 错误提示 */}
@@ -400,28 +402,50 @@ export default function KnowledgePage() {
               </Card>
             ) : (
               <div className="space-y-2">
-                {snippets
-                  .filter((s) => !search || s.chapter_name.includes(search))
-                  .map((s) => (
-                    <div key={s.id} className="overflow-hidden rounded-lg border">
-                      <div
-                        className="flex cursor-pointer items-center justify-between px-4 py-3 transition-colors hover:bg-slate-50"
-                        onClick={() => setExpandedSnippet(expandedSnippet === s.id ? null : s.id)}
-                      >
-                        <div className="flex items-center gap-3">
-                          {expandedSnippet === s.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                          <span className="font-mono text-xs text-slate-400">{s.chapter_no}</span>
-                          <span className="font-medium">{s.chapter_name}</span>
+                {(() => {
+                  const filtered = snippets.filter((s) => !search || s.chapter_name.includes(search) || s.content.includes(search));
+                  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+                  const paged = filtered.slice((snippetPage - 1) * PAGE_SIZE, snippetPage * PAGE_SIZE);
+                  return (
+                    <>
+                      <div className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-2 text-sm text-slate-500 dark:bg-slate-900">
+                        <span>共 <strong className="text-slate-700">{filtered.length}</strong> 条片段</span>
+                        <div className="flex items-center gap-2">
+                          <Button variant="outline" size="sm" disabled={snippetPage <= 1} onClick={() => setSnippetPage(snippetPage - 1)}>上一页</Button>
+                          <span className="text-xs">{snippetPage} / {totalPages || 1}</span>
+                          <Button variant="outline" size="sm" disabled={snippetPage >= totalPages} onClick={() => setSnippetPage(snippetPage + 1)}>下一页</Button>
                         </div>
-                        <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); handleDelete("snippets", s.id); }}>
-                          <Trash2 className="h-3.5 w-3.5 text-red-400" />
-                        </Button>
                       </div>
-                      {expandedSnippet === s.id && (
-                        <div className="border-t bg-slate-50 px-4 py-3 text-sm text-slate-600 whitespace-pre-wrap">{s.content}</div>
+                      {paged.map((s) => (
+                        <div key={s.id} className="overflow-hidden rounded-lg border">
+                          <div
+                            className="flex cursor-pointer items-center justify-between px-4 py-3 transition-colors hover:bg-slate-50"
+                            onClick={() => setExpandedSnippet(expandedSnippet === s.id ? null : s.id)}
+                          >
+                            <div className="flex items-center gap-3">
+                              {expandedSnippet === s.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                              <span className="font-mono text-xs text-slate-400">{s.chapter_no}</span>
+                              <span className="font-medium">{s.chapter_name}</span>
+                            </div>
+                            <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); handleDelete("snippets", s.id); }}>
+                              <Trash2 className="h-3.5 w-3.5 text-red-400" />
+                            </Button>
+                          </div>
+                          {expandedSnippet === s.id && (
+                            <div className="border-t bg-slate-50 px-4 py-3 text-sm text-slate-600 whitespace-pre-wrap">{s.content}</div>
+                          )}
+                        </div>
+                      ))}
+                      {totalPages > 1 && (
+                        <div className="flex items-center justify-center gap-2 pt-2">
+                          <Button variant="outline" size="sm" disabled={snippetPage <= 1} onClick={() => setSnippetPage(snippetPage - 1)}>上一页</Button>
+                          <span className="text-xs text-slate-500">{snippetPage} / {totalPages}</span>
+                          <Button variant="outline" size="sm" disabled={snippetPage >= totalPages} onClick={() => setSnippetPage(snippetPage + 1)}>下一页</Button>
+                        </div>
                       )}
-                    </div>
-                  ))}
+                    </>
+                  );
+                })()}
               </div>
             )
           )}
