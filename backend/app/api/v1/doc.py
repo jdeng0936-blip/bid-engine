@@ -42,16 +42,30 @@ async def generate_document(
 async def list_documents(
     project_id: int,
     payload: dict = Depends(get_current_user_payload),
+    session: AsyncSession = Depends(get_async_session),
 ):
-    """列出已生成的文档"""
+    """列出该项目已生成的文档"""
+    # 查询项目名称，用于匹配文件名前缀
+    from sqlalchemy import select
+    from app.models.project import Project
+    result = await session.execute(select(Project.face_name).where(Project.id == project_id))
+    face_name = result.scalar_one_or_none()
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    files = sorted(glob.glob(os.path.join(OUTPUT_DIR, "*.docx")), reverse=True)
+    all_files = sorted(glob.glob(os.path.join(OUTPUT_DIR, "*.docx")), reverse=True)
+
+    # 生成器将空格、斜杠替换为下划线，匹配时需同步处理
+    safe_name = face_name.replace("/", "_").replace(" ", "_") if face_name else None
+
     docs = []
-    for f in files[:20]:
+    for f in all_files:
         name = os.path.basename(f)
+        # 按转义后的项目名称前缀过滤
+        if safe_name and not name.startswith(safe_name):
+            continue
         size = os.path.getsize(f)
         docs.append({"filename": name, "size": size, "size_kb": round(size / 1024, 1)})
-    return ApiResponse(data=docs)
+    return ApiResponse(data=docs[:20])
 
 
 @router.get("/{project_id}/documents/download")
