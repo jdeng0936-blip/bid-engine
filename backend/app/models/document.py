@@ -3,6 +3,7 @@
 """
 from sqlalchemy import String, Integer, Float, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from pgvector.sqlalchemy import Vector
 
 from app.models.base import Base, AuditMixin
 
@@ -40,3 +41,5 @@ class ChapterSnippet(AuditMixin, Base):
     chapter_name: Mapped[str] = mapped_column(String(100), nullable=False, comment="章节名称")
     content: Mapped[str] = mapped_column(Text, nullable=False, comment="内容片段(Jinja2 模板)")
     sort_order: Mapped[int] = mapped_column(Integer, default=0, comment="排序权重")
+    # pgvector 向量列 — 用于语义检索
+    embedding = mapped_column(Vector(1536), nullable=True, comment="文本嵌入向量(1536维)")

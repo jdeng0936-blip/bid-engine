@@ -119,3 +119,59 @@ class EmbeddingService:
             for row in rows
             if float(row.distance) <= threshold
         ]
+
+    async def search_snippets(
+        self,
+        query: str,
+        tenant_id: int,
+        top_k: int = 5,
+        threshold: float = 0.35,
+    ) -> list[dict]:
+        """
+        从 chapter_snippet 表做语义检索 — 客户规程知识库
+
+        Args:
+            query: 查询文本
+            tenant_id: 租户ID
+            top_k: 返回前 K 条
+            threshold: 余弦距离阈值
+
+        Returns:
+            [{"snippet_id", "chapter_name", "content", "distance"}, ...]
+        """
+        query_emb = await self.embed_text(query)
+        if query_emb is None:
+            return []
+
+        emb_str = "[" + ",".join(str(v) for v in query_emb) + "]"
+
+        sql = text("""
+            SELECT
+                s.id AS snippet_id,
+                s.chapter_name,
+                s.content,
+                (s.embedding <=> CAST(:query_emb AS vector)) AS distance
+            FROM chapter_snippet s
+            WHERE s.embedding IS NOT NULL
+              AND (s.tenant_id = :tenant_id OR s.tenant_id = 0)
+            ORDER BY s.embedding <=> CAST(:query_emb AS vector)
+            LIMIT :top_k
+        """)
+
+        result = await self.session.execute(sql, {
+            "query_emb": emb_str,
+            "top_k": top_k,
+            "tenant_id": tenant_id,
+        })
+        rows = result.fetchall()
+
+        return [
+            {
+                "snippet_id": row.snippet_id,
+                "chapter_name": row.chapter_name,
+                "content": row.content,
+                "distance": round(float(row.distance), 4),
+            }
+            for row in rows
+            if float(row.distance) <= threshold
+        ]

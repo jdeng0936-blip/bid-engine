@@ -2,9 +2,10 @@
 RAG 三层融合检索器
 
 架构:
-  L1 — pgvector 语义检索（EmbeddingService.search_similar）
-  L2 — 结构化参数表精确查询（TableQueryService.query）
-  L3 — 结果融合 + 按相关性 Re-rank
+  L1a — pgvector 语义检索/标准库（EmbeddingService.search_similar）
+  L1b — pgvector 语义检索/知识库（EmbeddingService.search_snippets）
+  L2  — 结构化参数表精确查询（TableQueryService.query）
+  L3  — 结果融合 + 按相关性 Re-rank
 
 调用方式:
   retriever = HybridRetriever(session)
@@ -51,8 +52,13 @@ class HybridRetriever:
         """
         context = context or {}
 
-        # ===== L1: 语义检索 =====
+        # ===== L1a: 标准库语义检索 =====
         semantic_results = await self.embedding_svc.search_similar(
+            query=query, tenant_id=self.tenant_id, top_k=top_k
+        )
+
+        # ===== L1b: 知识库（客户规程）语义检索 =====
+        snippet_results = await self.embedding_svc.search_snippets(
             query=query, tenant_id=self.tenant_id, top_k=top_k
         )
 
@@ -62,41 +68,43 @@ class HybridRetriever:
         # 移除此处的 if-else 硬编码查表逻辑，使 Retriver 更加纯粹聚焦语义检索
 
         # ===== L3: 融合 + Re-rank =====
-        merged = self._merge_and_rank(semantic_results, table_results)
+        merged = self._merge_and_rank(semantic_results, table_results, snippet_results)
 
         # 生成检索摘要
-        summary = self._build_summary(semantic_results, table_results)
+        summary = self._build_summary(semantic_results, table_results, snippet_results)
 
         return {
             "semantic_results": semantic_results,
+            "snippet_results": snippet_results,
             "table_results": table_results,
             "merged": merged,
             "summary": summary,
         }
 
     def _merge_and_rank(
-        self, semantic: list[dict], tables: list[dict]
+        self, semantic: list[dict], tables: list[dict],
+        snippets: list[dict] | None = None,
     ) -> list[dict]:
         """
         融合排序逻辑:
           1. 结构化查表结果优先（精确匹配，置信度高）
-          2. 语义检索结果按距离排序（距离越小越相关）
+          2. 标准库 + 知识库语义结果按距离排序
           3. 每条结果附带 source 类型标签
         """
         merged = []
 
-        # 结构化结果放前面（权重更高）
+        # 结构化结果放前面
         for item in tables:
             merged.append({
                 "type": "table",
-                "relevance": 1.0,  # 精确匹配满分
+                "relevance": 1.0,
                 "content": item,
             })
 
-        # 语义结果按余弦距离转换为相关性分数
+        # 标准库语义结果
         for item in semantic:
             distance = item.get("distance", 1.0)
-            relevance = max(0, 1.0 - distance)  # 余弦距离 → 相关性
+            relevance = max(0, 1.0 - distance)
             merged.append({
                 "type": "semantic",
                 "relevance": round(relevance, 4),
@@ -108,13 +116,26 @@ class HybridRetriever:
                 },
             })
 
-        # 按相关性降序
-        merged.sort(key=lambda x: x["relevance"], reverse=True)
+        # 知识库（客户规程）语义结果
+        for item in (snippets or []):
+            distance = item.get("distance", 1.0)
+            relevance = max(0, 1.0 - distance)
+            merged.append({
+                "type": "snippet",
+                "relevance": round(relevance, 4),
+                "content": {
+                    "chapter_name": item.get("chapter_name", ""),
+                    "text": item.get("content", ""),
+                    "distance": distance,
+                },
+            })
 
+        merged.sort(key=lambda x: x["relevance"], reverse=True)
         return merged
 
     def _build_summary(
-        self, semantic: list[dict], tables: list[dict]
+        self, semantic: list[dict], tables: list[dict],
+        snippets: list[dict] | None = None,
     ) -> str:
         """生成检索摘要供 LLM 参考"""
         parts = []
@@ -122,7 +143,9 @@ class HybridRetriever:
             table_names = [t.get("table", "未知表") for t in tables]
             parts.append(f"结构化查表命中 {len(tables)} 条: {', '.join(table_names)}")
         if semantic:
-            parts.append(f"语义检索命中 {len(semantic)} 条标准条款")
+            parts.append(f"标准库语义检索命中 {len(semantic)} 条")
+        if snippets:
+            parts.append(f"知识库规程检索命中 {len(snippets)} 条")
         if not parts:
             return "未检索到相关信息"
         return "；".join(parts)
