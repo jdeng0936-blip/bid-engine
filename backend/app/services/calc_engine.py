@@ -15,7 +15,7 @@ import math
 from app.schemas.calc import SupportCalcInput, SupportCalcResult, CalcWarning
 
 
-# 围岩级别 → 安全系数映射
+# 围岩级别 → 安全系数映射（国标基准）
 ROCK_SAFETY_FACTOR: dict[str, float] = {
     "I": 1.2,
     "II": 1.3,
@@ -33,6 +33,17 @@ ROCK_ANCHOR_COEFFICIENT: dict[str, float] = {
     "V": 0.5,
 }
 
+# ===== 集团加严参数（华阳集团《采掘运技术管理规定》）=====
+# 集团加严：IV/V类围岩安全系数上调
+GROUP_SAFETY_FACTOR_OVERRIDE: dict[str, float] = {
+    "IV": 2.0,   # 国标1.8 → 集团2.0
+    "V": 2.5,    # 国标2.0 → 集团2.5
+}
+# 集团加严：构造影响段间排距加密系数（缩小20%）
+GROUP_STRUCT_ZONE_FACTOR: float = 0.8
+# 集团要求：IV/V类围岩须全长锚固
+GROUP_FULL_ANCHOR_ROCK_CLASSES: set[str] = {"IV", "V"}
+
 
 class SupportCalcEngine:
     """支护计算引擎 — 无状态纯函数"""
@@ -49,7 +60,9 @@ class SupportCalcEngine:
             SupportCalcResult 含计算结果和合规预警
         """
         warnings: list[CalcWarning] = []
-        K = ROCK_SAFETY_FACTOR.get(input_data.rock_class, 1.5)
+        K_national = ROCK_SAFETY_FACTOR.get(input_data.rock_class, 1.5)
+        # 集团加严：IV/V类围岩安全系数上调
+        K = GROUP_SAFETY_FACTOR_OVERRIDE.get(input_data.rock_class, K_national)
         anchor_coeff = ROCK_ANCHOR_COEFFICIENT.get(input_data.rock_class, 0.4)
 
         W = input_data.section_width
@@ -171,6 +184,58 @@ class SupportCalcEngine:
                 current_value=K,
                 required_value=1.5,
             ))
+
+        # ===== 集团标准合规校核 =====
+
+        # 集团加严：IV/V类围岩安全系数上调提示
+        if input_data.rock_class in GROUP_SAFETY_FACTOR_OVERRIDE:
+            warnings.append(CalcWarning(
+                level="info",
+                field="safety_factor",
+                message=(
+                    f"【集团标准】{input_data.rock_class}类围岩安全系数已上调："
+                    f"国标 {K_national} → 集团 {K}"
+                ),
+                current_value=K,
+                required_value=K_national,
+            ))
+
+        # 集团要求：IV/V类围岩须全长锚固
+        if input_data.rock_class in GROUP_FULL_ANCHOR_ROCK_CLASSES:
+            warnings.append(CalcWarning(
+                level="warning",
+                field="anchor_type",
+                message=(
+                    f"【集团标准】{input_data.rock_class}类围岩必须采用全长锚固，"
+                    f"严禁使用端头锚固"
+                ),
+                current_value=0,
+                required_value=1,
+            ))
+
+        # 集团要求：锚杆预紧力纳入强制检查
+        warnings.append(CalcWarning(
+            level="info",
+            field="pretension",
+            message=(
+                "【集团标准】锚杆预紧力必须逐根检查，"
+                "锚索预应力必须全部达标，检测记录存档备查"
+            ),
+            current_value=0,
+            required_value=1,
+        ))
+
+        # 集团要求：构造影响段提示
+        warnings.append(CalcWarning(
+            level="info",
+            field="structural_zone",
+            message=(
+                f"【集团标准】过断层/陷落柱等构造影响段，间排距须缩小至 "
+                f"{GROUP_STRUCT_ZONE_FACTOR*100:.0f}%，详见第三章“构造影响段加强支护”"
+            ),
+            current_value=1.0,
+            required_value=GROUP_STRUCT_ZONE_FACTOR,
+        ))
 
         return SupportCalcResult(
             section_area=round(section_area, 2),

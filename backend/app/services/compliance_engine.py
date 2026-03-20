@@ -172,6 +172,47 @@ class ComplianceEngine:
                 suggestion="落实注氮/灌浆等防灭火措施，配备束管监测系统",
             ))
 
+        # ========== 5. 集团标准加严校核 ==========
+
+        # 集团加严：最小净高（集团要求2.6m，国标2.5m）
+        GROUP_MIN_HEIGHT = 2.6
+        items.append(ComplianceItem(
+            category="集团标准", item="最小净高",
+            status="pass" if inp.section_height >= GROUP_MIN_HEIGHT else "fail",
+            message=(
+                f"【集团标准】净高 {inp.section_height}m "
+                f"{'≥' if inp.section_height >= GROUP_MIN_HEIGHT else '<'} "
+                f"集团要求 {GROUP_MIN_HEIGHT}m"
+            ),
+            suggestion="" if inp.section_height >= GROUP_MIN_HEIGHT else (
+                f"集团标准要求净高不低于 {GROUP_MIN_HEIGHT}m"
+            ),
+        ))
+
+        # 集团加严：最小净面积上浮10%
+        group_min_area = min_area * 1.1
+        items.append(ComplianceItem(
+            category="集团标准", item="净断面积",
+            status="pass" if area >= group_min_area else "warning",
+            message=(
+                f"【集团标准】净面积 {area:.1f}m² "
+                f"{'≥' if area >= group_min_area else '<'} "
+                f"集团要求 {group_min_area:.1f}m²（国标{min_area}m² × 1.1）"
+            ),
+            suggestion="" if area >= group_min_area else (
+                f"建议增大断面至 {group_min_area:.1f}m² 以满足集团标准"
+            ),
+        ))
+
+        # 集团要求：突出煤层必须编制防突专项措施
+        if inp.gas_level == "突出":
+            items.append(ComplianceItem(
+                category="集团标准", item="防突专项措施",
+                status="warning",
+                message="【集团标准】突出煤层掘进须编制防突专项安全技术措施",
+                suggestion="包含区域防突措施和局部防突措施，须经公司审批",
+            ))
+
         # ========== 汇总 ==========
         n_pass = sum(1 for i in items if i.status == "pass")
         n_fail = sum(1 for i in items if i.status == "fail")
@@ -185,3 +226,86 @@ class ComplianceEngine:
             is_compliant=(n_fail == 0),
             items=items,
         )
+
+    @staticmethod
+    async def semantic_audit(
+        chapters: list[dict],
+        session,
+        tenant_id: int = 0,
+    ) -> list[ComplianceItem]:
+        """
+        语义级合规审查 — 用 RAG + LLM 对规程章节逐一与集团标准比对
+
+        Args:
+            chapters: [{"title": "...", "content": "..."}] 待审查的规程章节
+            session: AsyncSession 数据库会话
+            tenant_id: 租户ID
+
+        Returns:
+            合规差距项列表
+        """
+        from app.services.embedding_service import EmbeddingService
+        from app.core.config import settings
+        from openai import AsyncOpenAI
+
+        items: list[ComplianceItem] = []
+        emb_svc = EmbeddingService(session)
+
+        api_key = settings.OPENAI_API_KEY or settings.GEMINI_API_KEY
+        base_url = settings.OPENAI_BASE_URL or None
+        model = settings.AI_MODEL
+
+        if not api_key:
+            return items  # 无大模型配置时降级
+
+        client_kwargs = {"api_key": api_key}
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        client = AsyncOpenAI(**client_kwargs)
+
+        for ch in chapters:
+            # RAG 检索集团标准相关条款
+            std_results = await emb_svc.search_similar(
+                query=ch["title"], tenant_id=tenant_id, top_k=5, threshold=0.5
+            )
+            if not std_results:
+                continue
+
+            ref_text = "\n".join(
+                f"- [{r['doc_title']}] {r['clause_no']}: {r['content'][:200]}"
+                for r in std_results
+            )
+
+            prompt = (
+                f"请对比以下规程章节内容与集团标准条款，列出不合规项（如有）。\n\n"
+                f"【规程章节】{ch['title']}\n{ch['content'][:500]}\n\n"
+                f"【集团标准参考条款】\n{ref_text}\n\n"
+                f"输出格式：每项一行，格式为「❌/⚠️ [检查项]: 说明」。"
+                f"如完全合规则输出「✅ 合规」。"
+            )
+
+            try:
+                resp = await client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                audit_text = resp.choices[0].message.content or ""
+
+                for line in audit_text.strip().splitlines():
+                    line = line.strip()
+                    if line.startswith("❌"):
+                        items.append(ComplianceItem(
+                            category="语义审查", item=ch["title"],
+                            status="fail", message=line,
+                            suggestion="请参照集团标准修改",
+                        ))
+                    elif line.startswith("⚠️"):
+                        items.append(ComplianceItem(
+                            category="语义审查", item=ch["title"],
+                            status="warning", message=line,
+                            suggestion="建议参照集团标准补充",
+                        ))
+            except Exception as e:
+                print(f"⚠️ 语义审查失败({ch['title']}): {e}")
+
+        return items
