@@ -75,6 +75,7 @@ const SOURCE_BADGE: Record<string, { label: string; color: string }> = {
   calc_engine: { label: "计算引擎", color: "bg-blue-100 text-blue-700" },
   rule_match: { label: "规则匹配", color: "bg-purple-100 text-purple-700" },
   ai: { label: "AI 生成", color: "bg-green-100 text-green-700" },
+  group_standard: { label: "集团标准", color: "bg-amber-100 text-amber-700" },
 };
 
 export default function ProjectDetailPage() {
@@ -341,7 +342,12 @@ export default function ProjectDetailPage() {
 
               {generateResult.chapters && (
                 <Card>
-                  <CardHeader><CardTitle className="flex items-center gap-2 text-sm"><FileText className="h-4 w-4" />文档结构预览</CardTitle></CardHeader>
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between text-sm">
+                      <span className="flex items-center gap-2"><FileText className="h-4 w-4" />文档结构预览</span>
+                      <span className="text-xs font-normal text-slate-400">共 {generateResult.chapters?.length || 0} 章</span>
+                    </CardTitle>
+                  </CardHeader>
                   <CardContent className="space-y-1">
                     {generateResult.chapters.map((ch: any, i: number) => {
                       const chKey = ch.chapter_no || ch.no || `ch-${i}`;
@@ -398,11 +404,14 @@ export default function ProjectDetailPage() {
             <Card className="flex h-64 items-center justify-center">
               <div className="text-center">
                 <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-blue-500" />
-                <p className="font-medium">正在生成规程文档...</p>
+                <p className="font-medium">正在生成9章规程文档...</p>
                 <div className="mt-3 space-y-1 text-left text-xs text-slate-500">
-                  <p>⏳ 加载项目参数...</p>
-                  <p>⏳ 规则匹配中...</p>
-                  <p>⏳ 计算校核中...</p>
+                  <p>⚙️ 第一章 地质概况 → 第二章 巷道布置与断面</p>
+                  <p>⚙️ 第三章 支护设计 → 第四章 施工工艺</p>
+                  <p>⚙️ 第五章 生产系统（含通风计算） → 第六章 劳动组织</p>
+                  <p>⚙️ 第七章 安全技术措施 → 第八章 灾害预防</p>
+                  <p>⚙️ 第九章 安全风控与应急避险 → 附录</p>
+                  <p className="mt-1 text-slate-400">📚 已纳入 244 条集团规范 · 双层合规校核</p>
                 </div>
               </div>
             </Card>
