@@ -48,7 +48,7 @@ const GEOLOGY_FIELDS: FieldDef[] = [
 ];
 
 const ROADWAY_FIELDS: FieldDef[] = [
-  { key: "roadway_type", label: "巷道类型", type: "select", options: ["进风巷", "回风巷", "运输巷", "联络巷", "石门"] },
+  { key: "roadway_type", label: "巷道类型", type: "select", options: ["进风巷", "回风巷", "高抽巷", "低抽巷", "切巷", "运输巷", "联络巷", "石门"] },
   { key: "excavation_type", label: "掘进类型", type: "select", options: ["煤巷", "岩巷", "半煤岩巷"] },
   { key: "section_form", label: "断面形式", type: "select", options: ["矩形", "拱形", "梯形"] },
   { key: "section_width", label: "断面宽度 (m)", type: "number" },

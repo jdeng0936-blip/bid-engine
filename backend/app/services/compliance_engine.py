@@ -29,6 +29,7 @@ class ComplianceInput(BaseModel):
     spontaneous_combustion: str = Field(default="不易自燃", description="自燃倾向性")
 
     # 巷道参数
+    roadway_type: str = Field(default="进风巷", description="巷道类型(进风巷/回风巷/高抽巷/低抽巷/切巷/运输巷/联络巷/石门)")
     section_form: Literal["矩形", "拱形", "梯形"] = Field(default="矩形", description="断面形式")
     section_width: float = Field(default=4.5, gt=0, description="断面宽度 m")
     section_height: float = Field(default=3.2, gt=0, description="断面高度 m")
@@ -172,7 +173,72 @@ class ComplianceEngine:
                 suggestion="落实注氮/灌浆等防灭火措施，配备束管监测系统",
             ))
 
-        # ========== 5. 集团标准加严校核 ==========
+        # ========== 5. 巷道类型专项校核 ==========
+        roadway = getattr(inp, 'roadway_type', '进风巷')
+
+        # 高抽巷 / 低抽巷 — 瓦斯抽放巷道专项要求
+        if roadway in ('高抽巷', '低抽巷'):
+            items.append(ComplianceItem(
+                category="巷道类型", item="瓦斯抽放巷道专项",
+                status="warning",
+                message=f"【{roadway}】属于瓦斯抽放巷道，须编制瓦斯抽采专项安全技术措施",
+                suggestion="须明确抽采钻孔布置参数、封孔工艺、管路敷设方式及抽采达标指标",
+            ))
+            items.append(ComplianceItem(
+                category="巷道类型", item=f"{roadway}密闭管理",
+                status="warning",
+                message=f"【{roadway}】须设置密闭墙，配备束管监测系统和安全监控传感器",
+                suggestion="密闭墙两侧须安设CO/CH4/O2传感器，并接入安全监控系统",
+            ))
+            # 高抽巷特殊要求
+            if roadway == '高抽巷':
+                items.append(ComplianceItem(
+                    category="巷道类型", item="高抽巷层位控制",
+                    status="warning",
+                    message="【高抽巷】层位须布置在煤层上方裂隙带内，距煤层顶板一般15~35m",
+                    suggestion="施工前须进行钻孔验证层位,确保在裂隙带内有效抽采",
+                ))
+            # 低抽巷特殊要求
+            if roadway == '低抽巷':
+                items.append(ComplianceItem(
+                    category="巷道类型", item="低抽巷底板控制",
+                    status="warning",
+                    message="【低抽巷】须布置在煤层底板，主要用于底板穿层钻孔预抽煤层瓦斯",
+                    suggestion="钻孔间距应根据煤层透气性系数确定，突出煤层一般≤5m",
+                ))
+
+        # 回风巷 — 反风能力要求
+        if roadway == '回风巷':
+            items.append(ComplianceItem(
+                category="巷道类型", item="回风巷反风系统",
+                status="warning",
+                message="【回风巷】须具备反风能力，反风量不得低于正常风量的40%",
+                suggestion="检查主要通风机反风装置，制定反风演习计划",
+            ))
+            if inp.gas_level in ('高瓦斯', '突出'):
+                items.append(ComplianceItem(
+                    category="巷道类型", item="回风巷瓦斯监测",
+                    status="warning",
+                    message=f"【回风巷·{inp.gas_level}】回风流中须设置甲烷/风速传感器实时监控",
+                    suggestion="传感器须按《煤矿安全规程》要求的位置和数量安装",
+                ))
+
+        # 切巷 — 短巷道特殊施工要求
+        if roadway == '切巷':
+            items.append(ComplianceItem(
+                category="巷道类型", item="切巷贯通安全",
+                status="warning",
+                message="【切巷】属于贯通巷道，须编制贯通安全技术措施",
+                suggestion="贯通前20m须停止一个工作面作业，做好通风系统调整方案",
+            ))
+            items.append(ComplianceItem(
+                category="巷道类型", item="切巷顶板管理",
+                status="warning",
+                message="【切巷】宽度较大时须加强初次放顶和末采管理",
+                suggestion="参照集团退锚放顶管理规定，制定安全技术措施",
+            ))
+
+        # ========== 6. 集团标准加严校核 ==========
 
         # 集团加严：最小净高（集团要求2.6m，国标2.5m）
         GROUP_MIN_HEIGHT = 2.6
