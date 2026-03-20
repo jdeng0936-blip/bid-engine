@@ -330,7 +330,7 @@ class DocGenerator:
         chapters.append(ChapterContent(
             chapter_no="第五章", title="生产系统",
             content="\n".join(system_lines), source="calc_engine" if vent_result else "template",
-            has_warning=vent_result and not vent_result.is_compliant,
+            has_warning=bool(vent_result and not vent_result.is_compliant),
         ))
 
         # ========== 第六章 劳动组织 ==========
