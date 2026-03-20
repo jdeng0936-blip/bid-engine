@@ -4,6 +4,16 @@
 
 [![Backend CI](https://github.com/jdeng0936-blip/-/actions/workflows/backend-ci.yml/badge.svg)](https://github.com/jdeng0936-blip/-/actions)
 
+## 📊 核心指标
+
+| 指标 | 数值 |
+|---|---|
+| AI 9 章结构覆盖率 | **92.1%**（429 条客户真实规程验证） |
+| 知识库总量 | **673 条**（244 集团标准 + 429 客户样本） |
+| 文档生成时间 | ≤ 35 秒（并发 AI 润色 + 30s 超时降级） |
+| 合规校验维度 | 4 维（断面 / 支护 / 通风 / 安全） |
+| 单元测试 | 79 用例 |
+
 ## ✨ 核心功能
 
 | 模块 | 描述 | 技术 |
@@ -12,9 +22,11 @@
 | 📐 支护计算引擎 | 锚杆/锚索间距、排距、数量自动计算 + 合规校验 | 确定性算法 |
 | 🌬️ 通风计算引擎 | 瓦斯/人数/炸药/风速 四法取最大值 + 局扇推荐 | 确定性算法 |
 | 📋 规则匹配引擎 | 围岩级别 × 断面形式 × 瓦斯等级 → 命中规则推荐 | DSL 规则树 |
-| 📄 文档生成引擎 | 参数 → 计算 → 规则 → AI 润色 → Word 导出 | python-docx |
-| 📚 标准库语义检索 | pgvector 向量检索 + 关键词混合检索 | RAG |
+| 📄 文档生成引擎 | 参数 → 计算 → 规则 → AI 润色 → 9 章 Word 导出 | python-docx + asyncio |
+| 📚 语义检索 | pgvector 向量检索 673 条标准+知识片段 | RAG |
 | 🔄 数据飞轮 | 用户反馈（采纳/修改/拒绝）→ 差异度量化 → SFT 数据池 | Jaccard 距离 |
+| ✅ 合规审查看板 | 项目级四维合规校核 · 批量审查 · 圆形进度环 | FastAPI + React |
+| 📊 基准对比 | AI 生成 vs 客户真实规程逐章覆盖率分析 | 向量分类 |
 
 ## 🏗️ 技术架构
 
@@ -103,26 +115,34 @@ docker-compose up -d
 ```
 backend/
 ├── app/
-│   ├── api/v1/          # FastAPI 路由（auth / projects / ai / feedback ...）
+│   ├── api/v1/          # FastAPI 路由（13 个模块）
 │   ├── core/            # 配置 / 数据库 / 安全
-│   ├── models/          # SQLAlchemy 模型（10 个业务表）
+│   ├── models/          # SQLAlchemy 模型
 │   ├── schemas/         # Pydantic V2 请求/响应模型
 │   └── services/        # 业务逻辑层
-│       ├── ai_router.py     # AI 智能路由引擎（6 个 Tool）
-│       ├── calc_engine.py   # 支护计算引擎
-│       ├── vent_engine.py   # 通风计算引擎
-│       ├── rule_service.py  # 规则匹配引擎
-│       ├── doc_generator.py # 文档生成引擎
-│       └── diff_sink.py     # 差异度下沉管道
+│       ├── ai_router.py        # AI 智能路由引擎（6 个 Tool）
+│       ├── calc_engine.py      # 支护计算引擎
+│       ├── vent_engine.py      # 通风计算引擎
+│       ├── rule_service.py     # 规则匹配引擎
+│       ├── doc_generator.py    # 文档生成引擎（并发 AI 润色）
+│       ├── compliance_engine.py# 合规校验引擎（4 维）
+│       ├── embedding_service.py# 向量检索服务
+│       └── diff_sink.py        # 差异度下沉管道
+├── scripts/
+│   ├── ingest_group_standards.py  # 集团标准入库（244 条）
+│   ├── ingest_customer_samples.py # 客户样本入库（429 条）
+│   └── benchmark_comparison.py    # AI vs 人工基准对比
 ├── migrations/          # Alembic 数据库迁移
 ├── tests/               # pytest 单元测试（79 用例）
 └── requirements.txt
 
 frontend/
-├── src/app/dashboard/   # 页面路由
+├── src/app/dashboard/   # 页面路由（11 个页面）
 │   ├── page.tsx         # 工作台（统计 + 飞轮面板）
 │   ├── ai/page.tsx      # AI 智能助手
-│   ├── projects/        # 规程项目管理
+│   ├── projects/        # 规程项目管理 + Word 下载
+│   ├── compliance/      # 合规审查看板（批量审查 + 进度环）
+│   ├── knowledge/       # 知识库（语义搜索 + CRUD）
 │   └── ...
 └── package.json
 ```
@@ -134,12 +154,10 @@ frontend/
 cd backend && source venv/bin/activate
 python -m pytest tests/ -q          # 全量运行
 python -m pytest tests/ -q -x       # 遇到第一个失败即停止
-python -m pytest tests/ -v -k "calc" # 只跑计算引擎测试
 
 # ===== 前端 (5 用例) =====
 cd frontend
-npm test                             # 全量运行
-npm run test:watch                   # 监听模式（改代码自动重跑）
+npm test
 ```
 
 ## 📊 API 概览
@@ -149,12 +167,13 @@ npm run test:watch                   # 监听模式（改代码自动重跑）
 | POST | `/api/v1/auth/login` | 用户登录（JWT） |
 | GET | `/api/v1/projects` | 项目列表（分页） |
 | POST | `/api/v1/ai/chat` | AI 对话（SSE 流式） |
-| POST | `/api/v1/ai/industries` | 行业类型列表 |
-| POST | `/api/v1/docs/generate/{id}` | 生成 Word 文档 |
+| POST | `/api/v1/projects/{id}/generate` | 生成 9 章 Word 文档 |
+| GET | `/api/v1/projects/{id}/documents/download` | 下载 Word 文件 |
+| POST | `/api/v1/calc/compliance/project/{id}` | 项目级合规审查 |
+| GET | `/api/v1/knowledge/search?q=` | 语义搜索知识库 |
 | POST | `/api/v1/feedback` | 提交用户反馈 |
 | GET | `/api/v1/feedback/stats` | 飞轮统计数据 |
 | GET | `/api/v1/standards` | 标准库列表 |
-| GET | `/api/v1/rules/groups` | 规则组列表 |
 
 完整文档：http://localhost:8000/docs
 
