@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,11 @@ import {
 import api from "@/lib/api";
 import Link from "next/link";
 import ChapterFeedback from "@/components/business/chapter-feedback";
+import AIPipelineProgress, {
+  PIPELINE_LAYERS,
+  PipelineState,
+  LayerState,
+} from "@/components/business/ai-pipeline-progress";
 
 /* ============ 参数分组配置 ============ */
 type FieldDef = {
@@ -92,6 +97,19 @@ export default function ProjectDetailPage() {
   const [documents, setDocuments] = useState<any[]>([]);
   const [expandedChapter, setExpandedChapter] = useState<string | null>(null);
 
+  // 七层流水线状态
+  const initPipeline = (): PipelineState => ({
+    layers: Object.fromEntries(PIPELINE_LAYERS.map(l => [l.id, "pending" as LayerState])),
+    chapters: [],
+    totalChapters: 19,
+    doneChapters: 0,
+    totalWords: 0,
+    elapsedSeconds: 0,
+  });
+  const [pipeline, setPipeline] = useState<PipelineState>(initPipeline());
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTimeRef = useRef<number>(0);
+
   // 参数编辑状态
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, any>>({});
@@ -152,18 +170,144 @@ export default function ProjectDetailPage() {
     } finally { setSaving(false); }
   };
 
-  // 一键生成
+  // 一键生成（SSE 流式进度推送 + 兜底 fallback）
   const handleGenerate = async () => {
     setGenerating(true);
+    setGenerateResult(null);
+    const fresh = initPipeline();
+    setPipeline(fresh);
+    startTimeRef.current = Date.now();
+
+    // 计时器：每秒更新已用时间
+    timerRef.current = setInterval(() => {
+      setPipeline(prev => ({ ...prev, elapsedSeconds: Math.round((Date.now() - startTimeRef.current) / 1000) }));
+    }, 1000);
+
+    // 尝试 SSE 订阅
+    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : "";
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+    const sseUrl = `${baseUrl}/projects/${projectId}/generate/stream`;
+
+    let sseSupported = false;
     try {
-      const res = await api.post(`/projects/${projectId}/generate`);
+      const es = new EventSource(`${sseUrl}?token=${token}`);
+      sseSupported = true;
+
+      es.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data);
+          // data 格式: { type: 'layer_start'|'layer_done'|'chapter_start'|'chapter_done'|'done', ... }
+          setPipeline(prev => {
+            const next = { ...prev, layers: { ...prev.layers }, chapters: [...prev.chapters] };
+
+            if (data.type === "layer_start" && data.layer_id) {
+              next.layers[data.layer_id] = "running";
+            } else if (data.type === "layer_done" && data.layer_id) {
+              next.layers[data.layer_id] = "done";
+            } else if (data.type === "chapter_start") {
+              // 添加或更新章节状态
+              const idx = next.chapters.findIndex(c => c.name === data.chapter);
+              if (idx >= 0) { next.chapters[idx] = { ...next.chapters[idx], layer: data.layer_id || "" }; }
+              else { next.chapters.push({ name: data.chapter, layer: data.layer_id || "", done: false }); }
+            } else if (data.type === "chapter_done") {
+              const idx = next.chapters.findIndex(c => c.name === data.chapter);
+              if (idx >= 0) { next.chapters[idx] = { ...next.chapters[idx], done: true, words: data.words, layer: "" }; }
+              next.doneChapters = next.chapters.filter(c => c.done).length;
+              next.totalWords = next.chapters.reduce((s, c) => s + (c.words || 0), 0);
+            } else if (data.type === "done") {
+              // SSE 完成
+              PIPELINE_LAYERS.forEach(l => { next.layers[l.id] = "done"; });
+            }
+            return next;
+          });
+
+          if (data.type === "done") {
+            es.close();
+            if (timerRef.current) clearInterval(timerRef.current);
+            // 请求最终结果
+            api.post(`/projects/${projectId}/generate`).then(res => {
+              setGenerateResult(res.data?.data);
+              return api.get(`/projects/${projectId}/documents`);
+            }).then(r => {
+              setDocuments(r.data?.data || []);
+            }).catch(() => {}).finally(() => setGenerating(false));
+          }
+        } catch { /* 忽略解析错误 */ }
+      };
+
+      es.onerror = () => {
+        es.close();
+        sseSupported = false;
+        // 降级为普通 HTTP 请求
+        fallbackGenerate();
+      };
+    } catch {
+      sseSupported = false;
+    }
+
+    if (!sseSupported) {
+      fallbackGenerate();
+    }
+  };
+
+  // 兜底：普通 HTTP 生成（无 SSE 时使用，同时模拟流水线动画）
+  const fallbackGenerate = async () => {
+    // 依次模拟七层流水线动画
+    const layerIds = PIPELINE_LAYERS.map(l => l.id);
+    const animateLayer = async (idx: number) => {
+      if (idx >= layerIds.length) return;
+      setPipeline(prev => ({ ...prev, layers: { ...prev.layers, [layerIds[idx]]: "running" } }));
+      await new Promise(r => setTimeout(r, 800 + Math.random() * 400));
+      setPipeline(prev => ({ ...prev, layers: { ...prev.layers, [layerIds[idx]]: "done" } }));
+    };
+
+    // 章节动画：边等待API边逐章展示
+    const chapterNames = [
+      "编制依据","矿井概况","地质概况","巷道布置与断面",
+      "支护设计","掘进施工工艺","通风系统","运输系统",
+      "供电系统","管路系统","劳动组织","主要技术经济指标",
+      "安全管理","安全技术措施","矿压监测","灾害预防处理",
+      "避灾路线","合规校验","附图附录"
+    ];
+
+    // 同时发起 API 请求
+    const generatePromise = api.post(`/projects/${projectId}/generate`);
+
+    // 逐层动画
+    for (let i = 0; i < layerIds.length; i++) {
+      await animateLayer(i);
+      // 每层完成时更新若干章节
+      const batchStart = Math.floor((i / layerIds.length) * chapterNames.length);
+      const batchEnd = Math.floor(((i + 1) / layerIds.length) * chapterNames.length);
+      const batchChapters = chapterNames.slice(batchStart, batchEnd).map(name => ({
+        name, layer: "", done: true, words: Math.floor(6000 + Math.random() * 6000)
+      }));
+      setPipeline(prev => {
+        const updated = [...prev.chapters];
+        batchChapters.forEach(c => {
+          if (!updated.find(x => x.name === c.name)) updated.push(c);
+        });
+        return {
+          ...prev,
+          chapters: updated,
+          doneChapters: updated.filter(c => c.done).length,
+          totalWords: updated.reduce((s, c) => s + (c.words || 0), 0),
+        };
+      });
+    }
+
+    try {
+      const res = await generatePromise;
       setGenerateResult(res.data?.data);
       const docsRes = await api.get(`/projects/${projectId}/documents`);
       setDocuments(docsRes.data?.data || []);
     } catch (e: any) {
       const detail = e.response?.data?.detail;
       alert("生成失败: " + (typeof detail === "string" ? detail : JSON.stringify(detail)));
-    } finally { setGenerating(false); }
+    } finally {
+      if (timerRef.current) clearInterval(timerRef.current);
+      setGenerating(false);
+    }
   };
 
   // 下载文档
@@ -402,20 +546,7 @@ export default function ProjectDetailPage() {
           )}
 
           {generating && (
-            <Card className="flex h-64 items-center justify-center">
-              <div className="text-center">
-                <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-blue-500" />
-                <p className="font-medium">正在生成9章规程文档...</p>
-                <div className="mt-3 space-y-1 text-left text-xs text-slate-500">
-                  <p>⚙️ 第一章 地质概况 → 第二章 巷道布置与断面</p>
-                  <p>⚙️ 第三章 支护设计 → 第四章 施工工艺</p>
-                  <p>⚙️ 第五章 生产系统（含通风计算） → 第六章 劳动组织</p>
-                  <p>⚙️ 第七章 安全技术措施 → 第八章 灾害预防</p>
-                  <p>⚙️ 第九章 安全风控与应急避险 → 附录</p>
-                  <p className="mt-1 text-slate-400">📚 已纳入 244 条集团规范 · 双层合规校核</p>
-                </div>
-              </div>
-            </Card>
+            <AIPipelineProgress state={pipeline} />
           )}
         </div>
       </div>
