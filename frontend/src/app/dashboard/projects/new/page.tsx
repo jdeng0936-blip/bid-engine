@@ -161,7 +161,12 @@ export default function NewProjectWizard() {
               <Label className="text-sm text-slate-600">所属矿井</Label>
               <Select value={form.mine_id || undefined} onValueChange={(v) => set("mine_id", v ?? "")}>
                 <SelectTrigger className="h-9">
-                  <SelectValue placeholder="选择矿井" />
+                  {/* 反查矿井名称，避免选中后仅显示数字 ID */}
+                  <SelectValue placeholder="选择矿井">
+                    {form.mine_id
+                      ? mines.find((m) => String(m.id) === form.mine_id)?.name || form.mine_id
+                      : "选择矿井"}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {mines.map((m: any) => (
@@ -210,7 +215,7 @@ export default function NewProjectWizard() {
         // 确认页：展示所有已填参数
         const filled = Object.entries(form).filter(([, v]) => v);
         const LABELS: Record<string, string> = {
-          face_name: "工作面名称", mine_id: "矿井 ID",
+          face_name: "工作面名称", mine_id: "所属矿井",
           rock_class: "围岩级别", coal_thickness: "煤层厚度",
           coal_dip_angle: "煤层倾角", gas_level: "瓦斯等级",
           hydro_type: "水文地质", geo_structure: "地质构造",
@@ -227,12 +232,17 @@ export default function NewProjectWizard() {
               请确认以下参数无误后点击"创建项目"
             </p>
             <div className="grid grid-cols-2 gap-2">
-              {filled.map(([k, v]) => (
+              {filled.map(([k, v]) => {
+                const displayValue = k === "mine_id"
+                  ? mines.find((m) => String(m.id) === v)?.name || v
+                  : v;
+                return (
                 <div key={k} className="flex items-center justify-between rounded bg-slate-50 px-3 py-2">
                   <span className="text-xs text-slate-500">{LABELS[k] || k}</span>
-                  <span className="text-sm font-medium">{v}</span>
+                  <span className="text-sm font-medium">{displayValue}</span>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         );

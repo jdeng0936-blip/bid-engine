@@ -228,11 +228,12 @@ async def update_clause(
     clause_id: int,
     body: StdClauseUpdate,
     payload: dict = Depends(get_current_user_payload),
+    tenant_id: int = Depends(get_tenant_id),
     session: AsyncSession = Depends(get_async_session),
 ):
     """更新条款"""
     svc = StandardService(session)
-    clause = await svc.update_clause(clause_id, body)
+    clause = await svc.update_clause(clause_id, body, tenant_id=tenant_id)
     if not clause:
         raise HTTPException(status_code=404, detail="条款不存在")
     return ApiResponse(data=StdClauseOut.model_validate(clause))
@@ -242,11 +243,12 @@ async def update_clause(
 async def delete_clause(
     clause_id: int,
     payload: dict = Depends(get_current_user_payload),
+    tenant_id: int = Depends(get_tenant_id),
     session: AsyncSession = Depends(get_async_session),
 ):
     """删除条款（递归删除子条款）"""
     svc = StandardService(session)
-    success = await svc.delete_clause(clause_id)
+    success = await svc.delete_clause(clause_id, tenant_id=tenant_id)
     if not success:
         raise HTTPException(status_code=404, detail="条款不存在")
     return ApiResponse(message="删除成功")

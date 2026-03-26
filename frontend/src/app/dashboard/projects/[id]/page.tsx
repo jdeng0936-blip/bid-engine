@@ -82,6 +82,7 @@ const SOURCE_BADGE: Record<string, { label: string; color: string }> = {
   ai: { label: "AI 生成", color: "bg-green-100 text-green-700" },
   ai_polished: { label: "AI 润色", color: "bg-emerald-100 text-emerald-700" },
   group_standard: { label: "集团标准", color: "bg-amber-100 text-amber-700" },
+  equipment_match: { label: "设备匹配", color: "bg-cyan-100 text-cyan-700" },
 };
 
 export default function ProjectDetailPage() {
@@ -109,6 +110,14 @@ export default function ProjectDetailPage() {
   const [pipeline, setPipeline] = useState<PipelineState>(initPipeline());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
+
+
+  // 组件卸载时清理计时器
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
 
   // 参数编辑状态
   const [editing, setEditing] = useState(false);
@@ -183,64 +192,88 @@ export default function ProjectDetailPage() {
       setPipeline(prev => ({ ...prev, elapsedSeconds: Math.round((Date.now() - startTimeRef.current) / 1000) }));
     }, 1000);
 
-    // 尝试 SSE 订阅
+    // 尝试 SSE 订阅（使用 fetch + ReadableStream 避免 Token 泄漏到 URL）
     const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : "";
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || "/api/v1";
     const sseUrl = `${baseUrl}/projects/${projectId}/generate/stream`;
 
     let sseSupported = false;
     try {
-      const es = new EventSource(`${sseUrl}?token=${token}`);
+      const response = await fetch(sseUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Accept": "text/event-stream",
+        },
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error("SSE not available");
+      }
+
       sseSupported = true;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-      es.onmessage = (evt) => {
+      const processStream = async () => {
         try {
-          const data = JSON.parse(evt.data);
-          // data 格式: { type: 'layer_start'|'layer_done'|'chapter_start'|'chapter_done'|'done', ... }
-          setPipeline(prev => {
-            const next = { ...prev, layers: { ...prev.layers }, chapters: [...prev.chapters] };
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-            if (data.type === "layer_start" && data.layer_id) {
-              next.layers[data.layer_id] = "running";
-            } else if (data.type === "layer_done" && data.layer_id) {
-              next.layers[data.layer_id] = "done";
-            } else if (data.type === "chapter_start") {
-              // 添加或更新章节状态
-              const idx = next.chapters.findIndex(c => c.name === data.chapter);
-              if (idx >= 0) { next.chapters[idx] = { ...next.chapters[idx], layer: data.layer_id || "" }; }
-              else { next.chapters.push({ name: data.chapter, layer: data.layer_id || "", done: false }); }
-            } else if (data.type === "chapter_done") {
-              const idx = next.chapters.findIndex(c => c.name === data.chapter);
-              if (idx >= 0) { next.chapters[idx] = { ...next.chapters[idx], done: true, words: data.words, layer: "" }; }
-              next.doneChapters = next.chapters.filter(c => c.done).length;
-              next.totalWords = next.chapters.reduce((s, c) => s + (c.words || 0), 0);
-            } else if (data.type === "done") {
-              // SSE 完成
-              PIPELINE_LAYERS.forEach(l => { next.layers[l.id] = "done"; });
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              const raw = line.slice(6).trim();
+              if (raw === "[DONE]") {
+                if (timerRef.current) clearInterval(timerRef.current);
+                // 请求最终结果
+                try {
+                  const res = await api.post(`/projects/${projectId}/generate`);
+                  setGenerateResult(res.data?.data);
+                  const r = await api.get(`/projects/${projectId}/documents`);
+                  setDocuments(r.data?.data || []);
+                } catch { /* 静默 */ }
+                setGenerating(false);
+                return;
+              }
+
+              try {
+                const data = JSON.parse(raw);
+                setPipeline(prev => {
+                  const next = { ...prev, layers: { ...prev.layers }, chapters: [...prev.chapters] };
+                  if (data.type === "layer_start" && data.layer_id) {
+                    next.layers[data.layer_id] = "running";
+                  } else if (data.type === "layer_done" && data.layer_id) {
+                    next.layers[data.layer_id] = "done";
+                  } else if (data.type === "chapter_start") {
+                    const idx = next.chapters.findIndex(c => c.name === data.chapter);
+                    if (idx >= 0) { next.chapters[idx] = { ...next.chapters[idx], layer: data.layer_id || "" }; }
+                    else { next.chapters.push({ name: data.chapter, layer: data.layer_id || "", done: false }); }
+                  } else if (data.type === "chapter_done") {
+                    const idx = next.chapters.findIndex(c => c.name === data.chapter);
+                    if (idx >= 0) { next.chapters[idx] = { ...next.chapters[idx], done: true, words: data.words, layer: "" }; }
+                    next.doneChapters = next.chapters.filter(c => c.done).length;
+                    next.totalWords = next.chapters.reduce((s, c) => s + (c.words || 0), 0);
+                  } else if (data.type === "done") {
+                    PIPELINE_LAYERS.forEach(l => { next.layers[l.id] = "done"; });
+                  }
+                  return next;
+                });
+              } catch { /* 忽略单条解析错误 */ }
             }
-            return next;
-          });
-
-          if (data.type === "done") {
-            es.close();
-            if (timerRef.current) clearInterval(timerRef.current);
-            // 请求最终结果
-            api.post(`/projects/${projectId}/generate`).then(res => {
-              setGenerateResult(res.data?.data);
-              return api.get(`/projects/${projectId}/documents`);
-            }).then(r => {
-              setDocuments(r.data?.data || []);
-            }).catch(() => {}).finally(() => setGenerating(false));
           }
-        } catch { /* 忽略解析错误 */ }
+        } catch {
+          // 流中断，降级为 HTTP 请求
+          fallbackGenerate();
+        }
       };
 
-      es.onerror = () => {
-        es.close();
-        sseSupported = false;
-        // 降级为普通 HTTP 请求
-        fallbackGenerate();
-      };
+      processStream();
     } catch {
       sseSupported = false;
     }

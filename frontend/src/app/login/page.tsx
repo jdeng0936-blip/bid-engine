@@ -118,9 +118,13 @@ export default function LoginPage() {
           </Button>
         </form>
 
-        <p className="text-center text-xs text-slate-500">
-          默认账号: admin / admin123
-        </p>
+        <button
+          type="button"
+          onClick={() => { setUsername("admin"); setPassword("admin123"); setTimeout(() => { const form = document.querySelector("form"); form?.requestSubmit(); }, 100); }}
+          className="w-full rounded-md border border-slate-600 py-2 text-sm text-slate-300 transition hover:bg-slate-700 hover:text-white"
+        >
+          🧪 测试账号一键登录 (admin)
+        </button>
       </div>
     </div>
   );

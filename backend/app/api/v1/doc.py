@@ -42,14 +42,19 @@ async def generate_document(
 async def list_documents(
     project_id: int,
     payload: dict = Depends(get_current_user_payload),
+    tenant_id: int = Depends(get_tenant_id),
     session: AsyncSession = Depends(get_async_session),
 ):
     """列出该项目已生成的文档"""
-    # 查询项目名称，用于匹配文件名前缀
     from sqlalchemy import select
     from app.models.project import Project
-    result = await session.execute(select(Project.face_name).where(Project.id == project_id))
+    # 必须校验项目归属当前租户
+    result = await session.execute(
+        select(Project.face_name).where(Project.id == project_id, Project.tenant_id == tenant_id)
+    )
     face_name = result.scalar_one_or_none()
+    if face_name is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     all_files = sorted(glob.glob(os.path.join(OUTPUT_DIR, "*.docx")), reverse=True)
@@ -73,13 +78,27 @@ async def download_document(
     project_id: int,
     filename: str = Query(..., description="文件名"),
     payload: dict = Depends(get_current_user_payload),
+    tenant_id: int = Depends(get_tenant_id),
+    session: AsyncSession = Depends(get_async_session),
 ):
-    """下载指定文档"""
-    filepath = os.path.join(OUTPUT_DIR, filename)
-    if not os.path.exists(filepath) or ".." in filename:
+    """下载指定文档 — 校验项目归属 + 路径遍历防御"""
+    from sqlalchemy import select
+    from app.models.project import Project
+    # 校验项目归属
+    result = await session.execute(
+        select(Project.id).where(Project.id == project_id, Project.tenant_id == tenant_id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    # 路径遍历防御：确保 resolved 路径在 OUTPUT_DIR 内
+    filepath = os.path.realpath(os.path.join(OUTPUT_DIR, filename))
+    if not filepath.startswith(os.path.realpath(OUTPUT_DIR)):
+        raise HTTPException(status_code=400, detail="非法文件路径")
+    if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="文件不存在")
     return FileResponse(
         filepath,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=filename,
+        filename=os.path.basename(filepath),
     )

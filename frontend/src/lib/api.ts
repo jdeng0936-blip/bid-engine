@@ -5,7 +5,7 @@ import axios from "axios";
 /** Axios 实例 — 自动注入 JWT Token */
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1",
-  timeout: 30000,
+  timeout: 600000, // 10分钟 — 规程生成等长耗时操作需要充足时间
   headers: { "Content-Type": "application/json" },
 });
 

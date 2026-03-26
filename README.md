@@ -74,7 +74,21 @@ npm install
 
 ```bash
 cp backend/.env.example backend/.env
-# 编辑 .env 填入真实的 GEMINI_API_KEY
+```
+
+编辑 `backend/.env`，**必须设置**以下变量：
+
+| 变量 | 必须 | 说明 |
+|---|---|---|
+| `GEMINI_API_KEY` | ✅ | Gemini API 密钥（AI 对话 / 文档润色） |
+| `SECRET_KEY` | ✅ 生产 | JWT 签名密钥，≥32 字节随机字符串。**非 DEBUG 模式未设置会拒绝启动** |
+| `DATABASE_URL` | ✅ | PostgreSQL 连接串（含 pgvector 扩展） |
+| `ADMIN_INIT_PASSWORD` | 可选 | 管理员初始密码（默认 `admin123`，建议自定义） |
+| `DEBUG` | 可选 | 调试模式（默认 `false`，开发环境设为 `true`） |
+
+```bash
+# 生成安全的 SECRET_KEY
+python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
 ### 3. 数据库初始化
@@ -190,6 +204,19 @@ bash backend/scripts/db_restore.sh ./backups/excavation_20260322_213000.dump
 ```
 
 > ⚠️ 恢复操作会覆盖当前数据库！恢复后需重启后端服务以重建数据库连接。
+
+## 🔒 安全加固日志
+
+### 2026-03-24 安全审查 & 修复
+
+| 严重度 | 隐患 | 修复文件 | 修复内容 |
+|---|---|---|---|
+| **CRITICAL** | 多租户隔离被击穿 | `standard.py` `standard_service.py` `doc.py` | 4 个端点补全 `tenant_id` 校验 + 路径遍历防御 |
+| **HIGH** | SSE 流式架构断裂 | `[id]/page.tsx` `ai_router.py` | `fetch + ReadableStream` 替代 `EventSource`，消除 Token 泄漏；AI 流加入超时和异常处理 |
+| **HIGH** | Nginx 安全头缺失 + 并发竞态 | `nginx.conf` `doc_generator.py` | 5 个安全响应头（X-Frame-Options 等）；`Semaphore(5)` 限制并发 |
+| **MEDIUM** | RAG 检索 `tenant_id` 硬编码 | `doc_generator.py` | `tenant_id=1` → 透传实际 `tenant_id` |
+| **MEDIUM** | SECRET_KEY 无启动校验 | `config.py` | 非 DEBUG 模式使用默认密钥直接拒绝启动 |
+| **LOW** | 管理员密码硬编码 | `main.py` | 改为 `ADMIN_INIT_PASSWORD` 环境变量读取 |
 
 ## 📄 License
 

@@ -15,6 +15,7 @@ import {
   Library,
   FileOutput,
   FileSearch,
+  Wrench,
 } from "lucide-react";
 import { useAuthStore } from "@/lib/stores/auth-store";
 
@@ -28,6 +29,7 @@ const NAV_ITEMS = [
   { href: "/dashboard/knowledge", label: "知识库", icon: Library },
   { href: "/dashboard/calc", label: "计算校验", icon: Calculator },
   { href: "/dashboard/compliance", label: "合规审查", icon: FileSearch },
+  { href: "/dashboard/equipment", label: "设备材料", icon: Wrench },
   { href: "/dashboard/ai", label: "AI 助手", icon: Bot },
   { href: "/dashboard/drawings", label: "图纸管理", icon: ImageIcon },
   { href: "/dashboard/system", label: "系统管理", icon: Database },

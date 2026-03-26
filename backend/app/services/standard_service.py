@@ -194,10 +194,13 @@ class StandardService:
         self,
         clause_id: int,
         data: StdClauseUpdate,
+        tenant_id: int = 0,
     ) -> Optional[StdClause]:
-        """更新条款"""
+        """更新条款 — 必须校验条款所属文档的 tenant_id"""
         result = await self.session.execute(
-            select(StdClause).where(StdClause.id == clause_id)
+            select(StdClause)
+            .join(StdDocument, StdClause.document_id == StdDocument.id)
+            .where(StdClause.id == clause_id, StdDocument.tenant_id == tenant_id)
         )
         clause = result.scalar_one_or_none()
         if not clause:
@@ -209,10 +212,12 @@ class StandardService:
         await self.session.refresh(clause)
         return clause
 
-    async def delete_clause(self, clause_id: int) -> bool:
-        """删除条款（递归删除子条款）"""
+    async def delete_clause(self, clause_id: int, tenant_id: int = 0) -> bool:
+        """删除条款（递归删除子条款）— 必须校验 tenant_id"""
         result = await self.session.execute(
-            select(StdClause).where(StdClause.id == clause_id)
+            select(StdClause)
+            .join(StdDocument, StdClause.document_id == StdDocument.id)
+            .where(StdClause.id == clause_id, StdDocument.tenant_id == tenant_id)
         )
         clause = result.scalar_one_or_none()
         if not clause:

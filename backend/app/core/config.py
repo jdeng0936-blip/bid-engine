@@ -45,3 +45,19 @@ class Settings(BaseSettings):
 
 # 全局单例
 settings = Settings()
+
+# 安全红线：SECRET_KEY 启动校验
+_DEFAULT_SECRET = "change-me-to-a-random-secret-key-at-least-32-chars"
+if settings.SECRET_KEY == _DEFAULT_SECRET:
+    if settings.DEBUG:
+        import warnings
+        warnings.warn(
+            "⚠️ SECRET_KEY 使用默认值，仅允许在 DEBUG 模式下运行。"
+            "请在 .env 中设置 SECRET_KEY 为 ≥32 字节的随机密钥。",
+            stacklevel=1,
+        )
+    else:
+        raise RuntimeError(
+            "❌ 生产环境禁止使用默认 SECRET_KEY！"
+            "请在 .env 中设置: SECRET_KEY=$(python -c \"import secrets; print(secrets.token_urlsafe(32))\")"
+        )

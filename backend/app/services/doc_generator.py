@@ -79,18 +79,33 @@ class DocGenerator:
             calc_result = self._run_support_calc(params_dict)
             vent_result = self._run_vent_calc(params_dict)
 
+        # 3.5 设备材料匹配
+        equipment_result = None
+        try:
+            from app.services.equipment_material_engine import EquipmentMaterialEngine
+            eq_engine = EquipmentMaterialEngine(self.session)
+            equipment_result = await eq_engine.run_full_match(project_id, tenant_id)
+            print(f"🔧 设备材料匹配完成: {equipment_result.total_equipment_count} 台设备, {equipment_result.total_material_types} 种材料")
+        except Exception as e:
+            print(f"⚠️ 设备材料匹配失败（降级跳过）: {e}")
+
         # 4. 组装章节
         chapters = self._assemble_chapters(
-            project, params_dict, match_result, calc_result, vent_result
+            project, params_dict, match_result, calc_result, vent_result,
+            equipment_result=equipment_result,
         )
 
         # 4.5 智能深度润色（AI赋能 + 范文 Few-shot + 计算推导注入）
         chapters = await self._ai_polish_content(
-            chapters, params_dict, calc_result, vent_result
+            chapters, params_dict, calc_result, vent_result,
+            tenant_id=tenant_id, project=project
         )
 
         # 5. 生成 Word
-        file_path = self._render_docx(project, chapters, calc_result, vent_result)
+        file_path = self._render_docx(
+            project, chapters, calc_result, vent_result,
+            equipment_result=equipment_result,
+        )
 
         total_warnings = 0
         if calc_result:
@@ -159,7 +174,7 @@ class DocGenerator:
 
     # ========== 章节组装 ==========
 
-    def _assemble_chapters(self, project, params_dict, match_result, calc_result, vent_result):
+    def _assemble_chapters(self, project, params_dict, match_result, calc_result, vent_result, equipment_result=None):
         """
         严格按华阳集团《采掘运技术管理规定》附件2
         《掘进工作面作业规程编制内容及提纲》组装规程
@@ -886,6 +901,59 @@ class DocGenerator:
         ))
 
         # ================================================================
+        #  第十章  主要设备及材料清单
+        # ================================================================
+        if equipment_result:
+            # 设备清单章节
+            eq_lines = ["一、主要设备配备表", ""]
+            eq_lines.append(f"  本工作面配备主要设备共 {equipment_result.total_equipment_count} 台（套），详见下表：")
+            eq_lines.append("")
+            eq_lines.append("  序号 | 设备类别 | 设备名称 | 型号规格 | 数量 | 功率(kW)")
+            eq_lines.append("  --- | --- | --- | --- | --- | ---")
+            for i, eq in enumerate(equipment_result.equipment_list, 1):
+                power_str = f"{eq.power_kw}" if eq.power_kw else "—"
+                eq_lines.append(
+                    f"  {i} | {eq.category} | {eq.name} | {eq.model_spec or '—'} | {eq.quantity} | {power_str}"
+                )
+            eq_lines.append("")
+            # 总装机功率
+            total_power = sum(eq.power_kw or 0 for eq in equipment_result.equipment_list)
+            if total_power > 0:
+                eq_lines.append(f"  总装机功率：{total_power:.1f} kW")
+
+            chapters.append(ChapterContent(
+                chapter_no="第十章-设备", title="主要设备配备",
+                content="\n".join(eq_lines), source="equipment_match",
+            ))
+
+            # 材料工程量章节
+            mat_lines = ["二、主要材料工程量清单", ""]
+            mat_lines.append(f"  本工作面共需 {equipment_result.total_material_types} 种主要支护材料，详见下表：")
+            mat_lines.append("")
+            mat_lines.append("  序号 | 材料类别 | 材料名称 | 规格型号 | 单位 | 单循环 | 月用量 | 工程总量")
+            mat_lines.append("  --- | --- | --- | --- | --- | --- | --- | ---")
+            for i, mat in enumerate(equipment_result.material_bom, 1):
+                mat_lines.append(
+                    f"  {i} | {mat.category} | {mat.name} | {mat.model_spec or '—'} | "
+                    f"{mat.unit} | {mat.qty_per_cycle or '—'} | {mat.qty_per_month or '—'} | {mat.qty_total or '—'}"
+                )
+            mat_lines.append("")
+            if equipment_result.material_bom:
+                mat_lines.append(f"  计算依据：{equipment_result.material_bom[0].calc_basis or '—'}")
+
+            chapters.append(ChapterContent(
+                chapter_no="第十章-材料", title="主要材料工程量清单",
+                content="\n".join(mat_lines), source="equipment_match",
+            ))
+        else:
+            # 降级：无设备材料匹配结果时仍生成占位章节
+            chapters.append(ChapterContent(
+                chapter_no="第十章", title="主要设备及材料清单",
+                content="（设备材料配置数据待补充，请通过设备材料管理页面完成配置后重新生成。）",
+                source="template",
+            ))
+
+        # ================================================================
         #  附录：编制依据与规则命中
         # ================================================================
         if match_result and match_result.matched_rules:
@@ -909,6 +977,8 @@ class DocGenerator:
         params: dict,
         calc_result=None,
         vent_result=None,
+        tenant_id: int = 0,
+        project=None,
     ) -> list[ChapterContent]:
         """
         AI 深度扩写引擎 — 交付顶级版（范文 Few-shot + 计算推导 + 多轮扩写）
@@ -938,6 +1008,31 @@ class DocGenerator:
         client = AsyncOpenAI(**client_kwargs)
 
         emb_svc = EmbeddingService(self.session)
+
+        # ===== 构建真值锚点（不可编造的硬数据） =====
+        face_name = getattr(project, 'face_name', '') if project else ''
+        mine_name = getattr(project, 'mine_name', '') if project else ''
+        anchor_parts = []
+        if face_name:
+            anchor_parts.append(f"巷道编号: {face_name}")
+        if mine_name:
+            anchor_parts.append(f"矿井名称: {mine_name}")
+        _anchor_keys = {
+            'section_width': '断面宽度(m)', 'section_height': '断面高度(m)',
+            'excavation_length': '掘进长度(m)', 'gas_level': '瓦斯等级',
+            'rock_class': '围岩类别', 'section_form': '断面形式',
+            'coal_seam': '煤层名称', 'coal_thickness': '煤层厚度(m)',
+            'seam_dip': '煤层倾角(°)', 'dig_method': '掘进方式',
+            'dig_equipment': '掘进设备', 'transport_method': '运输方式',
+        }
+        for k, label in _anchor_keys.items():
+            v = params.get(k)
+            if v is not None and str(v).strip():
+                anchor_parts.append(f"{label}: {v}")
+        truth_anchor = "\n".join(anchor_parts)
+        self._truth_anchor = truth_anchor
+        if truth_anchor:
+            print(f"⚓ 真值锚点构建完成: {len(anchor_parts)} 项参数")
 
         # ===== 加载范文片段（Few-shot 示例） =====
         ref_chapters: dict[str, str] = {}
@@ -1021,7 +1116,18 @@ class DocGenerator:
 - 操作步骤有明确的先后顺序
 - 安全措施按"一般规定→具体操作→质量标准→注意事项→应急处置"展开
 - 计算校核必须有完整公式推导和数值代入过程
-- 质量标准以量化指标形式给出（不得定性描述）"""
+- 质量标准以量化指标形式给出（不得定性描述）
+
+== 数据引用铁律（违反此规则视为严重错误） ==
+- 下文「真值锚点」中列出的工程参数是唯一数据源，正文必须原样引用，严禁修改数值或编造替代值
+- 巷道编号必须全文统一使用「真值锚点」中给出的名称，严禁使用任何其他巷道编号
+- 如果某个技术参数在「真值锚点」和「参数基线」中都没有提供，必须使用占位符「【待补充】」，严禁自行编造坐标、标高、断面尺寸等硬数据
+- 同一参数在不同章节出现时，数值必须完全一致
+
+== 公式格式铁律 ==
+- 公式输出必须使用纯文本格式（如 Q = K × S = 1.2 × 12.0 = 14.4 m³/min）
+- 严禁使用 LaTeX 数学语法（如 $Q=KS$ 或 \\frac{} 等），Word 文档无法渲染 LaTeX
+- 上下标用文字说明（如 V风速 而不是 V_{风速}）"""
 
         async def _polish_one(ch: ChapterContent) -> None:
             """单章多轮深度扩写"""
@@ -1052,7 +1158,7 @@ class DocGenerator:
                 seen = set()
                 for q in queries:
                     results = await emb_svc.search_similar(
-                        query=q, tenant_id=1, top_k=20, threshold=0.3
+                        query=q, tenant_id=tenant_id, top_k=20, threshold=0.3
                     )
                     if results:
                         for r in results:
@@ -1070,7 +1176,7 @@ class DocGenerator:
                 seen_s = set()
                 for q in queries:
                     results = await emb_svc.search_snippets(
-                        query=q, tenant_id=1, top_k=25, threshold=0.3
+                        query=q, tenant_id=tenant_id, top_k=25, threshold=0.3
                     )
                     if results:
                         for r in results:
@@ -1099,7 +1205,12 @@ class DocGenerator:
             # ===== 组装动态 Prompt 变量 =====
             ch_baseline = getattr(ch, '_baseline', '')
             baseline_text = f"== 前序核心章节参数基线（引用数据必须与此一致） ==\n{ch_baseline[:6000]}\n\n" if ch_baseline else ""
-            
+
+            # 真值锚点注入（拼在 baseline 前面，确保每轮都能看到）
+            anchor_text = getattr(self, '_truth_anchor', '')
+            anchor_section = f"== 真值锚点（以下工程参数为唯一数据源，严禁修改或编造） ==\n{anchor_text}\n\n" if anchor_text else ""
+            baseline_text = anchor_section + baseline_text
+
             rag_context_text = f"== 标准库和客户已有规程参考资料（务必深度融合） ==\n{rag_context}\n\n" if rag_context else ""
             
             fewshot_raw = self._find_reference_section(ch, ref_chapters)
@@ -1276,6 +1387,10 @@ class DocGenerator:
             except Exception as e:
                 print(f"⚠️ AI 扩写失败: {ch.title}: {e}")
 
+            # ===== AI 输出后处理清洗（防御性修正） =====
+            if ch.source in ('ai_polished', 'ai_self_iterated', 'ai_critic_fixed'):
+                ch.content = self._postprocess_ai_output(ch.content, face_name)
+
         # ===== 半串行三阶段架构 =====
 
         # 核心章节标识（概述、地质、支护 — 包含最基础工程数据）
@@ -1398,6 +1513,50 @@ class DocGenerator:
         return chapters
 
     @staticmethod
+    def _postprocess_ai_output(content: str, face_name: str) -> str:
+        """AI 输出后处理清洗 — LaTeX清洗 + 巷道编号强制替换 + 行去重"""
+        import re as _re
+
+        # 1. LaTeX 清洗：$...$ → 内部文本
+        def _clean_latex(match):
+            inner = match.group(1)
+            inner = _re.sub(r'\\frac\{([^}]*)\}\{([^}]*)\}', r'(\1)/(\2)', inner)
+            inner = _re.sub(r'\\times', '×', inner)
+            inner = _re.sub(r'\\div', '÷', inner)
+            inner = _re.sub(r'\\leq', '≤', inner)
+            inner = _re.sub(r'\\geq', '≥', inner)
+            inner = _re.sub(r'\\sqrt\{([^}]*)\}', r'√(\1)', inner)
+            inner = _re.sub(r'\\[a-zA-Z]+', '', inner)
+            inner = _re.sub(r'[{}]', '', inner)
+            inner = inner.replace('^', '').replace('_', '')
+            return inner.strip()
+        content = _re.sub(r'\$([^$]+)\$', _clean_latex, content)
+
+        # 2. 巷道编号强制替换
+        if face_name:
+            face_base = _re.search(r'(\d+)', face_name)
+            if face_base:
+                correct_num = face_base.group(1)
+                def _fix_face_ref(m):
+                    num, suffix = m.group(1), m.group(2)
+                    if num != correct_num and suffix in face_name:
+                        return face_name
+                    return m.group(0)
+                content = _re.sub(
+                    r'(\d{4,5})(进风巷|回风巷|运输巷|切眼)',
+                    _fix_face_ref, content
+                )
+
+        # 3. 章标题去重
+        lines = content.split('\n')
+        deduped = [lines[0]] if lines else []
+        for i in range(1, len(lines)):
+            if lines[i].strip() and lines[i].strip() == lines[i-1].strip():
+                continue
+            deduped.append(lines[i])
+        return '\n'.join(deduped)
+
+    @staticmethod
     def _find_reference_section(ch, ref_chapters: dict) -> str:
         """
         根据章节号和标题模糊匹配范文对应片段
@@ -1463,7 +1622,7 @@ class DocGenerator:
 
     # ========== Word 渲染 ==========
 
-    def _render_docx(self, project, chapters, calc_result, vent_result) -> str:
+    def _render_docx(self, project, chapters, calc_result, vent_result, equipment_result=None) -> str:
         """用 python-docx 生成 .docx 文件"""
         doc = Document()
 
@@ -1502,9 +1661,27 @@ class DocGenerator:
         doc.add_page_break()
 
         # --- 正文章节 ---
+        import re as _docx_re
+
+        # 子章节判定正则：第八章第X节、第九章-XXX 等拆分子节用 H2，主章节用 H1
+        _SUB_CHAPTER_RE = _docx_re.compile(
+            r'^第[一二三四五六七八九十\d]+章(?:第[一二三四五六七八九十\d]+节|[-—])'
+        )
+        # 内容中的节标题：仅匹配行首"第X节"后跟空格或汉字标题（避免误匹配正文段落）
+        _SECTION_TITLE_RE = _docx_re.compile(
+            r'^第[一二三四五六七八九十\d]+节[\s\u4e00-\u9fff]'
+        )
+        # 编号大项：一、二、……十、
+        _NUMBERED_ITEM_RE = _docx_re.compile(r'^[一二三四五六七八九十]+[、．.]')
+        # 条标题：第X条
+        _CLAUSE_TITLE_RE = _docx_re.compile(r'^第[一二三四五六七八九十百\d]+条')
+        # 数字条款 / 带括号编号：1. 2.（一）
+        _SUB_ITEM_RE = _docx_re.compile(r'^(\d{1,2}[\.、]|（[一二三四五六七八九十]）)')
+
         for ch in chapters:
-            # 章节标题
-            heading = doc.add_heading(f"{ch.chapter_no}  {ch.title}", level=1)
+            # 章节标题层级
+            _is_sub = bool(_SUB_CHAPTER_RE.match(ch.chapter_no))
+            heading = doc.add_heading(f"{ch.chapter_no}  {ch.title}", level=2 if _is_sub else 1)
 
             # 预警标记
             if ch.has_warning:
@@ -1513,8 +1690,80 @@ class DocGenerator:
                 warn_run.font.color.rgb = RGBColor(0xCC, 0x00, 0x00)
                 warn_run.font.bold = True
 
+            # ===== 设备/材料清单 → Word 表格渲染 =====
+            if ch.source == "equipment_match" and equipment_result:
+                if ch.chapter_no == "第十章-设备":
+                    # 设备清单表格
+                    doc.add_paragraph(
+                        f"本工作面配备主要设备共 {equipment_result.total_equipment_count} 台（套），详见下表："
+                    )
+                    headers = ["序号", "设备类别", "设备名称", "型号规格", "数量", "功率(kW)"]
+                    tbl = doc.add_table(rows=1, cols=len(headers), style="Table Grid")
+                    # 表头
+                    for j, h in enumerate(headers):
+                        cell = tbl.rows[0].cells[j]
+                        cell.text = h
+                        for run in cell.paragraphs[0].runs:
+                            run.font.bold = True
+                            run.font.size = Pt(10)
+                        cell.paragraphs[0].alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                    # 数据行
+                    for i, eq in enumerate(equipment_result.equipment_list, 1):
+                        row = tbl.add_row()
+                        row.cells[0].text = str(i)
+                        row.cells[1].text = eq.category
+                        row.cells[2].text = eq.name
+                        row.cells[3].text = eq.model_spec or "—"
+                        row.cells[4].text = str(eq.quantity)
+                        row.cells[5].text = f"{eq.power_kw}" if eq.power_kw else "—"
+                        for cell in row.cells:
+                            cell.paragraphs[0].alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                            for run in cell.paragraphs[0].runs:
+                                run.font.size = Pt(10)
+                    # 总装机功率
+                    total_power = sum(eq.power_kw or 0 for eq in equipment_result.equipment_list)
+                    if total_power > 0:
+                        p = doc.add_paragraph(f"总装机功率：{total_power:.1f} kW")
+                        p.runs[0].font.bold = True
+                    continue
+
+                elif ch.chapter_no == "第十章-材料":
+                    # 材料 BOM 表格
+                    doc.add_paragraph(
+                        f"本工作面共需 {equipment_result.total_material_types} 种主要支护材料，详见下表："
+                    )
+                    headers = ["序号", "材料类别", "材料名称", "规格型号", "单位", "单循环", "月用量", "工程总量"]
+                    tbl = doc.add_table(rows=1, cols=len(headers), style="Table Grid")
+                    for j, h in enumerate(headers):
+                        cell = tbl.rows[0].cells[j]
+                        cell.text = h
+                        for run in cell.paragraphs[0].runs:
+                            run.font.bold = True
+                            run.font.size = Pt(10)
+                        cell.paragraphs[0].alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                    for i, mat in enumerate(equipment_result.material_bom, 1):
+                        row = tbl.add_row()
+                        row.cells[0].text = str(i)
+                        row.cells[1].text = mat.category
+                        row.cells[2].text = mat.name
+                        row.cells[3].text = mat.model_spec or "—"
+                        row.cells[4].text = mat.unit
+                        row.cells[5].text = f"{mat.qty_per_cycle}" if mat.qty_per_cycle else "—"
+                        row.cells[6].text = f"{mat.qty_per_month}" if mat.qty_per_month else "—"
+                        row.cells[7].text = f"{mat.qty_total}" if mat.qty_total else "—"
+                        for cell in row.cells:
+                            cell.paragraphs[0].alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                            for run in cell.paragraphs[0].runs:
+                                run.font.size = Pt(10)
+                    # 计算依据
+                    if equipment_result.material_bom:
+                        basis = equipment_result.material_bom[0].calc_basis or ""
+                        if basis:
+                            p = doc.add_paragraph(f"计算依据：{basis}")
+                            p.runs[0].font.size = Pt(10)
+                    continue
+
             # 章节内容 — 智能排版引擎
-            import re as _docx_re
             for line in ch.content.split("\n"):
                 stripped = line.strip()
                 if not stripped:
@@ -1528,26 +1777,37 @@ class DocGenerator:
                     run.font.bold = True
                     continue
 
-                # --- 优先级 2: 节标题（第X节/第一节/一、/二、等） ---
-                is_section = bool(_docx_re.match(
-                    r'^(第[一二三四五六七八九十\d]+节|[一二三四五六七八九十]+[、．.])',
-                    stripped
-                ))
-                if is_section:
-                    h = doc.add_heading(stripped, level=2)
-                    h.runs[0].font.size = Pt(14) if h.runs else None
+                # --- 优先级 2: 节标题（"第X节 XXX"） ---
+                if _SECTION_TITLE_RE.match(stripped):
+                    h = doc.add_heading(stripped, level=3)
+                    if h.runs:
+                        h.runs[0].font.size = Pt(14)
                     continue
 
-                # --- 优先级 3: 条标题（第X条/1./2./（一）等） ---
-                is_clause = bool(_docx_re.match(
-                    r'^(第[一二三四五六七八九十百\d]+条|（[一二三四五六七八九十]）|\d{1,2}[\.、])',
-                    stripped
-                ))
-                if is_clause:
-                    h = doc.add_heading(stripped, level=3)
-                    for run in h.runs:
+                # 编号条目（一、二、等）用加粗段落
+                if _NUMBERED_ITEM_RE.match(stripped):
+                    p = doc.add_paragraph()
+                    run = p.add_run(stripped)
+                    run.font.size = Pt(12)
+                    run.font.bold = True
+                    continue
+
+                # --- 优先级 3: 条标题（第X条）---
+                if _CLAUSE_TITLE_RE.match(stripped):
+                    p = doc.add_paragraph()
+                    run = p.add_run(stripped)
+                    run.font.size = Pt(12)
+                    run.font.bold = True
+                    continue
+
+                # 数字条款：1. 2. （一）用正文缩进
+                if _SUB_ITEM_RE.match(stripped):
+                    p = doc.add_paragraph(stripped)
+                    pf = p.paragraph_format
+                    pf.left_indent = Pt(12)
+                    pf.space_before = Pt(2)
+                    for run in p.runs:
                         run.font.size = Pt(12)
-                        run.font.bold = True
                     continue
 
                 # --- 优先级 4: 款标题（（1）/(1)/①等子条款） ---
