@@ -176,12 +176,18 @@ class QuotationService:
         return True
 
     async def recalculate_total(self, sheet_id: int, tenant_id: int) -> Optional[QuotationSheet]:
-        """重新计算报价表总金额"""
+        """重新计算报价表总金额，并回写到 BidProject.bid_amount"""
         sheet = await self.get_sheet(sheet_id, tenant_id)
         if not sheet:
             return None
         total = sum(item.amount or 0 for item in sheet.items)
         sheet.total_amount = round(total, 2)
+
+        # 回写项目报价金额
+        project = await self._check_project(sheet.project_id, tenant_id)
+        if project:
+            project.bid_amount = sheet.total_amount
+
         await self.session.commit()
         await self.session.refresh(sheet)
         return sheet

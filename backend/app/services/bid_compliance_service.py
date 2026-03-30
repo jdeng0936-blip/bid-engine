@@ -9,14 +9,19 @@
   5. 商务要求（commercial）— 检查商务条款是否被响应
 
 架构:
-  - 规则型检查（关键词/资质匹配）优先，LLM 检查作为补充（可选）
+  - 第一层：规则型检查（关键词/资质匹配），快速且确定性高
+  - 第二层：LLM 语义审查，对 warning 项做精细判定（通过 LLMSelector 路由）
   - 检查结果写入 TenderRequirement.compliance_status / compliance_note
 """
+import json
 from typing import Optional
 
+from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
+from app.core.llm_selector import LLMSelector
 from app.models.bid_project import BidProject, TenderRequirement, BidChapter
 from app.models.enterprise import Enterprise
 from app.models.credential import Credential
@@ -121,7 +126,23 @@ class BidComplianceService:
 
             results.append(r)
 
-            # 写入数据库
+        # ===== 第二层: LLM 语义审查（仅对 warning 项做精细判定）=====
+        warning_items = [
+            (r, req) for r, req in zip(results, project.requirements)
+            if r.status == "warning" and req.category in ("disqualification", "scoring")
+        ]
+        if warning_items:
+            llm_results = await self._llm_semantic_check(
+                warning_items, all_chapter_text, credentials
+            )
+            for (orig_r, req), llm_r in zip(warning_items, llm_results):
+                if llm_r:
+                    # LLM 结果覆盖原 warning
+                    idx = results.index(orig_r)
+                    results[idx] = llm_r
+
+        # 写入数据库
+        for r, req in zip(results, project.requirements):
             req.compliance_status = r.status
             req.compliance_note = r.note
 
@@ -272,6 +293,93 @@ class BidComplianceService:
                 "商务要求关键词在投标章节中未找到响应，建议补充"
             )
         return ComplianceResult(req.id, "passed", "商务要求已响应")
+
+    async def _llm_semantic_check(
+        self,
+        items: list[tuple["ComplianceResult", TenderRequirement]],
+        chapter_text: str,
+        credentials: list[Credential],
+    ) -> list[Optional["ComplianceResult"]]:
+        """LLM 语义级合规审查（第二层增强）
+
+        对规则层输出 warning 的废标项和评分项，用 LLM 做精细语义匹配。
+        降级策略：LLM 调用失败时返回 None（保留原关键词检查结果）。
+        """
+        if not items:
+            return []
+
+        try:
+            model = LLMSelector.get_model("compliance_check")
+            temperature = LLMSelector.get_temperature("compliance_check")
+            max_tokens = LLMSelector.get_max_tokens("compliance_check")
+        except (KeyError, ValueError):
+            return [None] * len(items)
+
+        # 构建批量检查 prompt
+        cred_summary = "、".join(c.cred_name for c in credentials) if credentials else "无资质数据"
+        # 截取章节文本前 6000 字（避免超长）
+        chapter_excerpt = chapter_text[:6000]
+
+        req_list = "\n".join(
+            f"{i+1}. [{req.category}] {req.content}"
+            for i, (_, req) in enumerate(items)
+        )
+
+        prompt = f"""你是投标合规审查专家。请逐条判断以下招标要求是否在投标文件中被充分响应。
+
+## 企业已有资质
+{cred_summary}
+
+## 投标文件内容（摘要）
+{chapter_excerpt}
+
+## 待检查的招标要求
+{req_list}
+
+## 输出要求
+对每条要求，判定 status 和 note：
+- status: "passed"（已充分响应）/ "failed"（明确不满足，有废标风险）/ "warning"（部分响应但不充分）
+- note: 简要说明判定理由（30字以内）
+
+请严格按以下 JSON 数组格式输出，不要输出其他内容：
+[{{"index": 1, "status": "passed", "note": "..."}}, ...]"""
+
+        try:
+            client = AsyncOpenAI(
+                api_key=settings.OPENAI_API_KEY,
+                base_url=settings.OPENAI_BASE_URL or None,
+            )
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            text = response.choices[0].message.content or ""
+
+            # 提取 JSON 数组
+            import re
+            json_match = re.search(r'\[.*\]', text, re.DOTALL)
+            if not json_match:
+                return [None] * len(items)
+
+            parsed = json.loads(json_match.group())
+            results: list[Optional[ComplianceResult]] = []
+            for i, (orig_r, req) in enumerate(items):
+                entry = next((p for p in parsed if p.get("index") == i + 1), None)
+                if entry and entry.get("status") in ("passed", "failed", "warning"):
+                    results.append(ComplianceResult(
+                        req.id,
+                        entry["status"],
+                        f"[AI审查] {entry.get('note', '')}"
+                    ))
+                else:
+                    results.append(None)
+            return results
+
+        except Exception:
+            # LLM 调用失败，静默降级
+            return [None] * len(items)
 
     @staticmethod
     def _extract_keywords(text: str) -> list[str]:
