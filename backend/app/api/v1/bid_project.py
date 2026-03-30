@@ -1,10 +1,11 @@
 """
-投标项目 API 路由 — BidProject + TenderRequirement + BidChapter CRUD + 招标文件上传解析 + AI 生成
+投标项目 API 路由 — BidProject + TenderRequirement + BidChapter CRUD + 招标文件上传解析 + AI 生成 + 导出
 """
 import json
+import os
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
@@ -18,6 +19,8 @@ from app.schemas.bid_project import (
 from app.services.bid_project_service import BidProjectService
 from app.services.tender_parser import TenderParseService
 from app.services.bid_generation_service import BidGenerationService
+from app.services.bid_doc_exporter import BidDocExporter
+from app.services.bid_compliance_service import BidComplianceService
 
 router = APIRouter(prefix="/bid-projects", tags=["投标项目"])
 
@@ -398,3 +401,71 @@ async def generate_all_chapters(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ========== 投标文件导出 ==========
+
+@router.post("/{project_id}/export", response_model=ApiResponse)
+async def export_bid_doc(
+    project_id: int,
+    tenant_id: int = Depends(get_tenant_id),
+    payload: dict = Depends(get_current_user_payload),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """导出投标文件为 Word 文档"""
+    exporter = BidDocExporter(session)
+    try:
+        file_path = await exporter.export(project_id, tenant_id)
+        filename = os.path.basename(file_path)
+        return ApiResponse(data={
+            "file_path": file_path,
+            "filename": filename,
+            "message": "投标文件导出成功",
+        })
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导出失败: {str(e)}")
+
+
+@router.get("/{project_id}/download")
+async def download_bid_doc(
+    project_id: int,
+    tenant_id: int = Depends(get_tenant_id),
+    payload: dict = Depends(get_current_user_payload),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """下载已生成的投标文件"""
+    svc = BidProjectService(session)
+    project = await svc.get_project(project_id, tenant_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="投标项目不存在")
+    if not project.bid_doc_path or not os.path.exists(project.bid_doc_path):
+        raise HTTPException(status_code=404, detail="投标文件尚未生成，请先导出")
+
+    filename = os.path.basename(project.bid_doc_path)
+    return FileResponse(
+        path=project.bid_doc_path,
+        filename=filename,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+# ========== 合规检查 ==========
+
+@router.post("/{project_id}/compliance-check", response_model=ApiResponse)
+async def compliance_check(
+    project_id: int,
+    tenant_id: int = Depends(get_tenant_id),
+    payload: dict = Depends(get_current_user_payload),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """废标项 + 资格 + 评分覆盖合规检查"""
+    svc = BidComplianceService(session)
+    try:
+        result = await svc.check(project_id, tenant_id)
+        return ApiResponse(data=result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"合规检查失败: {str(e)}")

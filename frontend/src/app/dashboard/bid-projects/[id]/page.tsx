@@ -17,6 +17,7 @@ import {
   Clock,
   Sparkles,
   Trash2,
+  ShieldCheck,
 } from "lucide-react";
 import Link from "next/link";
 import api from "@/lib/api";
@@ -85,6 +86,11 @@ export default function BidProjectDetailPage() {
   const [uploading, setUploading] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [activeTab, setActiveTab] = useState("disqualification");
+  const [checking, setChecking] = useState(false);
+  const [complianceResult, setComplianceResult] = useState<{
+    total: number; passed: number; failed: number; warning: number;
+    results: { id: number; category: string; content: string; status: string; note: string }[];
+  } | null>(null);
 
   const fetchProject = useCallback(async () => {
     try {
@@ -132,6 +138,19 @@ export default function BidProjectDetailPage() {
       await fetchProject();
     } finally {
       setParsing(false);
+    }
+  };
+
+  const handleComplianceCheck = async () => {
+    setChecking(true);
+    try {
+      const res = await api.post(`/bid-projects/${projectId}/compliance-check`);
+      setComplianceResult(res.data?.data);
+      await fetchProject();
+    } catch (err: any) {
+      alert(err.response?.data?.detail || "合规检查失败");
+    } finally {
+      setChecking(false);
     }
   };
 
@@ -221,6 +240,99 @@ export default function BidProjectDetailPage() {
         </Card>
         </Link>
       </div>
+
+      {/* 合规检查 */}
+      {project.requirements.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5" />
+                合规检查
+              </CardTitle>
+              <Button
+                onClick={handleComplianceCheck}
+                disabled={checking}
+                variant={complianceResult ? "outline" : "default"}
+              >
+                {checking ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                )}
+                {checking ? "检查中..." : complianceResult ? "重新检查" : "开始合规检查"}
+              </Button>
+            </div>
+          </CardHeader>
+          {complianceResult && (
+            <CardContent>
+              {/* 汇总 */}
+              <div className="mb-4 grid grid-cols-4 gap-3">
+                <div className="rounded-lg bg-slate-50 p-3 text-center">
+                  <div className="text-2xl font-bold">{complianceResult.total}</div>
+                  <div className="text-xs text-slate-500">检查项</div>
+                </div>
+                <div className="rounded-lg bg-green-50 p-3 text-center">
+                  <div className="text-2xl font-bold text-green-600">{complianceResult.passed}</div>
+                  <div className="text-xs text-green-600">通过</div>
+                </div>
+                <div className="rounded-lg bg-red-50 p-3 text-center">
+                  <div className="text-2xl font-bold text-red-600">{complianceResult.failed}</div>
+                  <div className="text-xs text-red-600">不通过</div>
+                </div>
+                <div className="rounded-lg bg-amber-50 p-3 text-center">
+                  <div className="text-2xl font-bold text-amber-600">{complianceResult.warning}</div>
+                  <div className="text-xs text-amber-600">警告</div>
+                </div>
+              </div>
+
+              {/* 问题清单（只显示 failed 和 warning） */}
+              {complianceResult.results
+                .filter((r) => r.status !== "passed")
+                .map((r) => (
+                  <div
+                    key={r.id}
+                    className={`mb-2 rounded-lg border p-3 ${
+                      r.status === "failed"
+                        ? "border-red-300 bg-red-50"
+                        : "border-amber-300 bg-amber-50"
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      {r.status === "failed" ? (
+                        <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+                      ) : (
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                      )}
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            variant={r.status === "failed" ? "destructive" : "outline"}
+                            className="text-xs"
+                          >
+                            {CATEGORY_MAP[r.category]?.label || r.category}
+                          </Badge>
+                          <span className="text-sm text-slate-700">{r.content}</span>
+                        </div>
+                        <p className={`mt-1 text-xs ${
+                          r.status === "failed" ? "text-red-600 font-medium" : "text-amber-600"
+                        }`}>
+                          {r.note}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              {complianceResult.failed === 0 && complianceResult.warning === 0 && (
+                <div className="rounded-lg bg-green-50 p-4 text-center">
+                  <CheckCircle2 className="mx-auto h-8 w-8 text-green-500" />
+                  <p className="mt-2 text-sm font-medium text-green-700">全部检查通过！</p>
+                </div>
+              )}
+            </CardContent>
+          )}
+        </Card>
+      )}
 
       {/* 招标文件上传 & 解析 */}
       <Card>
@@ -320,11 +432,29 @@ export default function BidProjectDetailPage() {
                         <cat.icon className={`mt-0.5 h-4 w-4 shrink-0 ${cat.color}`} />
                         <div className="flex-1">
                           <p className="text-sm text-slate-800">{req.content}</p>
-                          <div className="mt-1 flex items-center gap-2 text-xs text-slate-400">
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                             {req.is_mandatory && <Badge variant="outline">必须</Badge>}
                             {req.max_score && <span>满分: {req.max_score}</span>}
                             {req.score_weight && <span>权重: {req.score_weight}%</span>}
+                            {req.compliance_status === "passed" && (
+                              <Badge className="bg-green-100 text-green-700 border-green-200">通过</Badge>
+                            )}
+                            {req.compliance_status === "failed" && (
+                              <Badge variant="destructive">不通过</Badge>
+                            )}
+                            {req.compliance_status === "warning" && (
+                              <Badge className="bg-amber-100 text-amber-700 border-amber-200">警告</Badge>
+                            )}
                           </div>
+                          {req.compliance_note && (
+                            <p className={`mt-1 text-xs ${
+                              req.compliance_status === "failed" ? "text-red-500" :
+                              req.compliance_status === "warning" ? "text-amber-500" :
+                              "text-green-500"
+                            }`}>
+                              {req.compliance_note}
+                            </p>
+                          )}
                         </div>
                         <Button
                           variant="ghost"

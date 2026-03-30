@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   FileText,
   Zap,
+  Download,
 } from "lucide-react";
 import Link from "next/link";
 import api from "@/lib/api";
@@ -52,6 +53,7 @@ export default function ChaptersEditorPage() {
   const [generatingAll, setGeneratingAll] = useState(false);
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState<{ completed: number; total: number; failed: number } | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const fetchChapters = useCallback(async () => {
     try {
@@ -187,6 +189,37 @@ export default function ChaptersEditorPage() {
     }
   };
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      // 1. 触发导出生成
+      await api.post(`/bid-projects/${projectId}/export`);
+      // 2. 下载文件
+      const res = await api.get(`/bid-projects/${projectId}/download`, {
+        responseType: "blob",
+      });
+      const blob = new Blob([res.data], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const disposition = res.headers["content-disposition"];
+      const filename = disposition
+        ? decodeURIComponent(disposition.split("filename=")[1]?.replace(/"/g, "") || "投标文件.docx")
+        : "投标文件.docx";
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || "导出失败");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const selectedChapter = chapters.find((ch) => ch.id === selectedId);
 
   if (loading && chapters.length === 0) {
@@ -216,20 +249,34 @@ export default function ChaptersEditorPage() {
               初始化章节
             </Button>
           ) : (
-            <Button
-              onClick={handleGenerateAll}
-              disabled={generatingAll}
-              variant="default"
-            >
-              {generatingAll ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Zap className="mr-2 h-4 w-4" />
-              )}
-              {generatingAll
-                ? `生成中 ${progress?.completed || 0}/${progress?.total || 0}`
-                : "一键生成全部"}
-            </Button>
+            <>
+              <Button
+                onClick={handleGenerateAll}
+                disabled={generatingAll}
+                variant="default"
+              >
+                {generatingAll ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Zap className="mr-2 h-4 w-4" />
+                )}
+                {generatingAll
+                  ? `生成中 ${progress?.completed || 0}/${progress?.total || 0}`
+                  : "一键生成全部"}
+              </Button>
+              <Button
+                onClick={handleExport}
+                disabled={exporting || generatingAll}
+                variant="outline"
+              >
+                {exporting ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-2 h-4 w-4" />
+                )}
+                {exporting ? "导出中..." : "导出 Word"}
+              </Button>
+            </>
           )}
         </div>
       </div>
