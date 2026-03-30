@@ -3,22 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  FileText,
   Database,
-  Settings2,
-  ImageIcon,
-  Calculator,
   LayoutDashboard,
-  BookOpen,
   LogOut,
   Bot,
   Library,
-  FileOutput,
-  FileSearch,
-  Wrench,
   ClipboardList,
-  Building2,
-  ShieldCheck,
 } from "lucide-react";
 import { useAuthStore } from "@/lib/stores/auth-store";
 
@@ -26,11 +16,8 @@ import { useAuthStore } from "@/lib/stores/auth-store";
 const NAV_ITEMS = [
   { href: "/dashboard", label: "工作台", icon: LayoutDashboard },
   { href: "/dashboard/bid-projects", label: "投标项目", icon: ClipboardList },
-  { href: "/dashboard/documents", label: "文档中心", icon: FileOutput },
-  { href: "/dashboard/standards", label: "标准库", icon: BookOpen },
-  { href: "/dashboard/knowledge", label: "知识库", icon: Library },
-  { href: "/dashboard/compliance", label: "合规审查", icon: FileSearch },
   { href: "/dashboard/ai", label: "AI 助手", icon: Bot },
+  { href: "/dashboard/knowledge", label: "知识库", icon: Library },
   { href: "/dashboard/system", label: "系统管理", icon: Database },
 ];
 

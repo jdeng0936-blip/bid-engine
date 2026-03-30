@@ -15,12 +15,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.models.base import Base
 # 导入所有模型确保 metadata 包含所有表
-from app.models.project import Project, ProjectParams  # noqa
-from app.models.standard import StdDocument, StdClause, EngCase  # noqa
-from app.models.rule import RuleGroup, Rule, RuleCondition, RuleAction  # noqa
 from app.models.user import SysUser, SysRole  # noqa
-from app.models.mine import SysMine  # noqa
-from app.models.document import GeneratedDoc, DocTemplate, ChapterSnippet  # noqa
+from app.models.chat import ChatSession, ChatMessageRecord  # noqa
+from app.models.enterprise import Enterprise  # noqa
+from app.models.bid_project import BidProject, TenderRequirement, BidChapter  # noqa
+from app.models.credential import Credential  # noqa
+from app.models.quotation import QuotationSheet, QuotationItem  # noqa
+from app.models.image_asset import ImageAsset  # noqa
 
 config = context.config
 

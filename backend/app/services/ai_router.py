@@ -2,8 +2,8 @@
 AI 智能路由引擎 — LLM Tool Calling 驱动的意图识别与引擎调度
 
 核心设计：
-  1. 定义 8 个 Tool（支护/通风/循环计算 + 规则匹配 + 标准库语义检索
-     + 安全建议 + 设备材料匹配 + 知识库摘要）
+  1. 定义投标业务 Tool（招标解析 + 章节生成 + 报价初始化 +
+     合规检查 + 知识库检索 + 文档导出）
   2. LLM 解析用户自然语言 → 决定调用哪个工具 + 提取参数
   3. 执行工具 → 将结果回传 LLM → 生成中文解读
   4. 支持 SSE 流式输出
@@ -162,7 +162,7 @@ TOOLS = [
 class AIRouter:
     """AI 智能路由引擎"""
 
-    def __init__(self, session: Optional[AsyncSession] = None, tenant_id: int = 0, industry_type: str = "coal_excavation"):
+    def __init__(self, session: Optional[AsyncSession] = None, tenant_id: int = 0, industry_type: str = "fresh_food"):
         # 优先使用 OpenAI，兼容 Gemini（通过 OpenAI 兼容 API）
         from app.core.config import settings
         api_key = settings.OPENAI_API_KEY or settings.GEMINI_API_KEY

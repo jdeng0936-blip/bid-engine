@@ -1,7 +1,7 @@
 """
 系统管理 Service — 业务逻辑层
 
-覆盖用户、角色、矿井、操作日志、数据字典五个子模块。
+覆盖用户、角色、操作日志、数据字典四个子模块。
 所有查询强制注入 tenant_id 过滤（规范红线第 3 条）。
 """
 from typing import Optional
@@ -11,13 +11,11 @@ from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import SysUser, SysRole
-from app.models.mine import SysMine
 from app.models.audit_log import AuditLog
 from app.models.dict_item import SysDictItem
 from app.schemas.system import (
     UserCreate, UserUpdate, PasswordReset,
     RoleCreate, RoleUpdate,
-    MineCreate, MineUpdate,
     DictItemCreate, DictItemUpdate,
 )
 
@@ -176,70 +174,6 @@ class RoleService:
         )
         return result.scalar_one_or_none()
 
-
-# ========== 矿井配置 ==========
-
-class MineService:
-    """矿井管理 CRUD"""
-
-    def __init__(self, session: AsyncSession):
-        self.session = session
-
-    async def list_mines(
-        self, tenant_id: int, page: int = 1, page_size: int = 20
-    ) -> tuple[list[SysMine], int]:
-        """分页查询矿井列表"""
-        query = select(SysMine).where(SysMine.tenant_id == tenant_id)
-        total = (await self.session.execute(
-            select(func.count()).select_from(query.subquery())
-        )).scalar() or 0
-
-        mines = list((await self.session.execute(
-            query.order_by(SysMine.id.desc()).offset((page - 1) * page_size).limit(page_size)
-        )).scalars().all())
-        return mines, total
-
-    async def create_mine(
-        self, data: MineCreate, tenant_id: int, created_by: int
-    ) -> SysMine:
-        """新增矿井"""
-        mine = SysMine(
-            name=data.name, company=data.company, gas_level=data.gas_level,
-            address=data.address, contact=data.contact, phone=data.phone,
-            tenant_id=tenant_id, created_by=created_by,
-        )
-        self.session.add(mine)
-        await self.session.flush()
-        await self.session.refresh(mine)
-        return mine
-
-    async def update_mine(
-        self, mine_id: int, tenant_id: int, data: MineUpdate
-    ) -> Optional[SysMine]:
-        """编辑矿井"""
-        mine = await self._get_mine(mine_id, tenant_id)
-        if not mine:
-            return None
-        for k, v in data.model_dump(exclude_unset=True).items():
-            setattr(mine, k, v)
-        await self.session.flush()
-        await self.session.refresh(mine)
-        return mine
-
-    async def delete_mine(self, mine_id: int, tenant_id: int) -> bool:
-        """删除矿井"""
-        mine = await self._get_mine(mine_id, tenant_id)
-        if not mine:
-            return False
-        await self.session.delete(mine)
-        await self.session.flush()
-        return True
-
-    async def _get_mine(self, mine_id: int, tenant_id: int) -> Optional[SysMine]:
-        result = await self.session.execute(
-            select(SysMine).where(SysMine.id == mine_id, SysMine.tenant_id == tenant_id)
-        )
-        return result.scalar_one_or_none()
 
 
 # ========== 操作日志 ==========

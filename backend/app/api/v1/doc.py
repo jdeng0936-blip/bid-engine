@@ -1,99 +1,55 @@
 """
-文档生成 API 路由 — 触发生成 + 文件下载 + 文档列表
+文档管理 API 路由 — 投标文件列表 + 下载
+
+说明:
+  投标文件的导出/下载已由 bid_project.py 中的 /export 和 /download 端点处理。
+  本模块仅保留对 storage/bid_outputs/ 目录的通用文件浏览功能，
+  供管理员查看所有已导出的投标文件。
 """
 import os
 import glob
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_async_session
 from app.core.deps import get_current_user_payload, get_tenant_id
 from app.schemas.common import ApiResponse
-from app.schemas.doc import DocGenerateRequest, DocGenerateResult
-from app.services.doc_generator import DocGenerator
 
-router = APIRouter(prefix="/projects", tags=["文档生成"])
+router = APIRouter(prefix="/documents", tags=["文档管理"])
 
-# 输出目录
-OUTPUT_DIR = os.path.join(
+# 投标文件输出目录
+BID_OUTPUT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
-    "storage", "outputs"
+    "storage", "bid_outputs"
 )
 
 
-@router.post("/{project_id}/generate", response_model=ApiResponse[DocGenerateResult])
-async def generate_document(
-    project_id: int,
-    tenant_id: int = Depends(get_tenant_id),
-    payload: dict = Depends(get_current_user_payload),
-    session: AsyncSession = Depends(get_async_session),
-):
-    """一键生成规程文档（参数→规则匹配→计算校核→Word 输出）"""
-    gen = DocGenerator(session)
-    try:
-        result = await gen.generate(project_id, tenant_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return ApiResponse(data=result)
-
-
-@router.get("/{project_id}/documents", response_model=ApiResponse)
-async def list_documents(
-    project_id: int,
+@router.get("", response_model=ApiResponse)
+async def list_bid_documents(
     payload: dict = Depends(get_current_user_payload),
     tenant_id: int = Depends(get_tenant_id),
-    session: AsyncSession = Depends(get_async_session),
 ):
-    """列出该项目已生成的文档"""
-    from sqlalchemy import select
-    from app.models.project import Project
-    # 必须校验项目归属当前租户
-    result = await session.execute(
-        select(Project.face_name).where(Project.id == project_id, Project.tenant_id == tenant_id)
-    )
-    face_name = result.scalar_one_or_none()
-    if face_name is None:
-        raise HTTPException(status_code=404, detail="项目不存在")
-
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    all_files = sorted(glob.glob(os.path.join(OUTPUT_DIR, "*.docx")), reverse=True)
-
-    # 生成器将空格、斜杠替换为下划线，匹配时需同步处理
-    safe_name = face_name.replace("/", "_").replace(" ", "_") if face_name else None
+    """列出已生成的投标文件"""
+    os.makedirs(BID_OUTPUT_DIR, exist_ok=True)
+    all_files = sorted(glob.glob(os.path.join(BID_OUTPUT_DIR, "*.docx")), reverse=True)
 
     docs = []
     for f in all_files:
         name = os.path.basename(f)
-        # 按转义后的项目名称前缀过滤
-        if safe_name and not name.startswith(safe_name):
-            continue
         size = os.path.getsize(f)
         docs.append({"filename": name, "size": size, "size_kb": round(size / 1024, 1)})
-    return ApiResponse(data=docs[:20])
+    return ApiResponse(data=docs[:50])
 
 
-@router.get("/{project_id}/documents/download")
+@router.get("/download")
 async def download_document(
-    project_id: int,
     filename: str = Query(..., description="文件名"),
     payload: dict = Depends(get_current_user_payload),
     tenant_id: int = Depends(get_tenant_id),
-    session: AsyncSession = Depends(get_async_session),
 ):
-    """下载指定文档 — 校验项目归属 + 路径遍历防御"""
-    from sqlalchemy import select
-    from app.models.project import Project
-    # 校验项目归属
-    result = await session.execute(
-        select(Project.id).where(Project.id == project_id, Project.tenant_id == tenant_id)
-    )
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="项目不存在")
-
-    # 路径遍历防御：确保 resolved 路径在 OUTPUT_DIR 内
-    filepath = os.path.realpath(os.path.join(OUTPUT_DIR, filename))
-    if not filepath.startswith(os.path.realpath(OUTPUT_DIR)):
+    """下载指定文档 — 路径遍历防御"""
+    # 路径遍历防御：确保 resolved 路径在 BID_OUTPUT_DIR 内
+    filepath = os.path.realpath(os.path.join(BID_OUTPUT_DIR, filename))
+    if not filepath.startswith(os.path.realpath(BID_OUTPUT_DIR)):
         raise HTTPException(status_code=400, detail="非法文件路径")
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="文件不存在")

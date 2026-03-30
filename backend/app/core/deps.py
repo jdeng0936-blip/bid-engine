@@ -43,7 +43,7 @@ async def get_current_user_payload(
 async def get_tenant_id(
     payload: dict = Depends(get_current_user_payload),
 ) -> int:
-    """提取当前请求的 tenant_id（矿井 ID）
+    """提取当前请求的 tenant_id（企业/租户 ID）
 
     规范红线：所有关系查询必须注入 tenant_id 过滤。
     """

@@ -11,39 +11,24 @@ from app.core.database import engine, async_session_factory
 from app.models.base import Base
 
 # 导入所有模型，确保 SQLAlchemy 注册全部表
+# ---- 系统模型 ----
 from app.models.user import SysUser, SysRole  # noqa: F401
-from app.models.project import *  # noqa: F401,F403
-from app.models.standard import *  # noqa: F401,F403
-from app.models.rule import *  # noqa: F401,F403
-from app.models.document import *  # noqa: F401,F403
-from app.models.mine import *  # noqa: F401,F403
-from app.models.drawing import *  # noqa: F401,F403
-from app.models.audit_log import *  # noqa: F401,F403
-from app.models.feedback import *  # noqa: F401,F403
-from app.models.dict_item import *  # noqa: F401,F403
-from app.models.equipment import *  # noqa: F401,F403
 from app.models.chat import *  # noqa: F401,F403
+# ---- 投标业务模型 ----
 from app.models.enterprise import *  # noqa: F401,F403
 from app.models.bid_project import *  # noqa: F401,F403
 from app.models.credential import *  # noqa: F401,F403
 from app.models.quotation import *  # noqa: F401,F403
 from app.models.image_asset import *  # noqa: F401,F403
 
+# ---- API 路由 ----
 from app.api.v1.health import router as health_router
 from app.api.v1.auth import router as auth_router
-from app.api.v1.project import router as project_router
-from app.api.v1.standard import router as standard_router
-from app.api.v1.rule import router as rule_router
-from app.api.v1.rule import match_router
-from app.api.v1.calc import router as calc_router
-from app.api.v1.doc import router as doc_router
 from app.api.v1.ai import router as ai_router
-from app.api.v1.knowledge import router as knowledge_router
-from app.api.v1.drawing import router as drawing_router
-from app.api.v1.system import router as system_router
-from app.api.v1.feedback import router as feedback_router
-from app.api.v1.equipment import router as equipment_router
 from app.api.v1.chat import router as chat_router
+from app.api.v1.knowledge import router as knowledge_router
+from app.api.v1.system import router as system_router
+# ---- 投标业务路由 ----
 from app.api.v1.enterprise import router as enterprise_router
 from app.api.v1.bid_project import router as bid_project_router
 from app.api.v1.credential import router as credential_router
@@ -131,19 +116,11 @@ app.add_middleware(
 # --- 注册路由 ---
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
-app.include_router(project_router, prefix="/api/v1")
-app.include_router(standard_router, prefix="/api/v1")
-app.include_router(rule_router, prefix="/api/v1")
-app.include_router(match_router, prefix="/api/v1")
-app.include_router(calc_router, prefix="/api/v1")
-app.include_router(doc_router, prefix="/api/v1")
 app.include_router(ai_router, prefix="/api/v1")
-app.include_router(knowledge_router, prefix="/api/v1")
-app.include_router(drawing_router, prefix="/api/v1")
-app.include_router(system_router, prefix="/api/v1")
-app.include_router(feedback_router, prefix="/api/v1")
-app.include_router(equipment_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
+app.include_router(knowledge_router, prefix="/api/v1")
+app.include_router(system_router, prefix="/api/v1")
+# ---- 投标业务 ----
 app.include_router(enterprise_router, prefix="/api/v1")
 app.include_router(bid_project_router, prefix="/api/v1")
 app.include_router(credential_router, prefix="/api/v1")
