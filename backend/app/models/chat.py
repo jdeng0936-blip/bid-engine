@@ -8,7 +8,7 @@ AI 对话会话 + 消息历史持久化模型
 设计原则：
   - 每个会话绑定 tenant_id + user_id，支持多租户隔离
   - 消息按 created_at 时序存储，查询时按序还原历史
-  - 支持关联项目（project_id），便于在项目上下文中持续对话
+  - 支持关联投标项目（bid_project_id），便于在项目上下文中持续对话
 """
 from sqlalchemy import String, Integer, Text, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -27,12 +27,12 @@ class ChatSession(AuditMixin, Base):
     title: Mapped[str] = mapped_column(
         String(200), nullable=True, comment="会话标题（自动取首条消息前50字）"
     )
-    project_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("project.id", ondelete="SET NULL"),
-        nullable=True, index=True, comment="关联项目ID（可选）"
+    bid_project_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("bid_project.id", ondelete="SET NULL"),
+        nullable=True, index=True, comment="关联投标项目ID（可选）"
     )
     industry_type: Mapped[str] = mapped_column(
-        String(50), default="coal_excavation", comment="行业类型"
+        String(50), default="fresh_food_delivery", comment="行业类型"
     )
     is_archived: Mapped[bool] = mapped_column(
         Integer, default=0, comment="是否归档(0=活跃/1=归档)"

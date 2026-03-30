@@ -19,7 +19,7 @@ class AuditMixin:
     所有业务表都必须混入此类，确保 tenant_id 隔离和审计追踪。
     """
     tenant_id: Mapped[int] = mapped_column(
-        Integer, nullable=False, index=True, comment="租户ID（矿井ID）"
+        Integer, nullable=False, index=True, comment="租户ID（企业ID）"
     )
     created_by: Mapped[int] = mapped_column(
         Integer, nullable=True, comment="创建人ID"

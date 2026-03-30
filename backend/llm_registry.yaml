@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════
-# LLM 模型注册表 — 掘进工作面规程智能生成平台
+# LLM 模型注册表 — 鲜标智投 · 生鲜食材配送投标文件智能生成平台
 # ═══════════════════════════════════════════════════════
 #
 # 规则：
@@ -8,102 +8,105 @@
 # 3. 首选模型失败时，自动 fallback 到下一个
 # 4. 修改此文件即可全局切换模型，无需改代码
 #
-# 通信渠道：LiteLLM 代理网关
-#   LITELLM_BASE_URL=http://44.225.205.28:4000/v1
-#   所有模型调用统一经过 LiteLLM 路由
+# 合规要求（P0红线）：
+#   - 生产环境仅允许使用国产大模型（DeepSeek/通义千问/文心）
+#   - Gemini/GPT 仅限本地开发调试
+#   - 投标数据禁止发送至境外服务器
 
-# --- LiteLLM 网关已注册模型清单 ---
+# --- 模型可用清单 ---
 #
-#   Tier 1 (高性能推理):
-#     - gemini-3.1-pro-preview      # Google 最新 Pro，最强推理+Tool Calling
-#     - gemini-2.5-pro              # Google 稳定版 Pro
-#     - gpt-5.2                     # OpenAI 最新旗舰
+#   国产合规模型（生产环境）:
+#     - deepseek-chat              # DeepSeek-V3，性价比最优
+#     - deepseek-reasoner          # DeepSeek-R1，深度推理
+#     - qwen-max                   # 通义千问最强版
+#     - qwen-plus                  # 通义千问性价比版
 #
-#   Tier 2 (性价比主力):
-#     - gemini-3-flash-preview      # Google 最新 Flash，快速推理
-#     - gemini-2.5-flash            # Google 稳定版 Flash
-#     - gpt-5.1                     # OpenAI 性价比
-#
-#   Tier 3 (经济型):
-#     - gpt-5-mini                  # OpenAI 轻量级
+#   开发调试模型（仅限本地）:
+#     - gemini-2.5-flash           # Google 快速推理
+#     - gemini-2.5-pro             # Google 强推理
 #
 #   Embedding:
-#     - gemini-embedding-001        # Google 最新 (原生3072, 支持降维1536/768)
-#     - text-embedding-005          # Google embedding v5 (768维, fallback)
+#     - gemini-embedding-001       # 开发期（已有Key）
+#     - text-embedding-v3          # 通义千问 embedding（生产替换）
 
 # --- 任务路由表 ---
 tasks:
 
   # ===== 核心 AI 对话 =====
 
-  # AI 路由引擎 — Tool Calling 意图识别 + 6大工具调度
-  # （支护计算/通风计算/循环计算/标准检索/参数查表/安全建议）
+  # AI 路由引擎 — Tool Calling 意图识别 + 8大投标工具调度
   tool_calling:
-    models: ["gemini-3.1-pro-preview", "gemini-2.5-pro", "gpt-5.1"]
+    models: ["deepseek-chat", "qwen-max", "gemini-2.5-flash"]
     temperature: 0.1
     max_tokens: 1024
     note: "核心路由，要求工具调用准确率最高，优先用最强模型"
 
-  # AI 对话 — 掘进智脑通用会话（不含工具调用的纯对话场景）
+  # AI 对话 — 投标智能助手通用会话
   chat:
-    models: ["gemini-3-flash-preview", "gemini-2.5-flash", "gpt-5-mini"]
+    models: ["deepseek-chat", "qwen-plus", "gemini-2.5-flash"]
     temperature: 0.5
     max_tokens: 2048
 
-  # 工具结果解读 — LLM 解读计算引擎/检索引擎返回的结果
+  # 工具结果解读 — LLM 解读招标解析/报价计算/合规检查结果
   tool_result_interpret:
-    models: ["gemini-3-flash-preview", "gemini-2.5-flash"]
+    models: ["deepseek-chat", "qwen-plus"]
     temperature: 0.3
     max_tokens: 2048
 
-  # ===== 规程文档生成 =====
+  # ===== 投标文档生成 =====
 
-  # 规程章节生成 — 根据工程参数+标准条款生成规程章节内容
-  doc_section_generate:
-    models: ["gemini-3.1-pro-preview", "gemini-2.5-pro"]
+  # 投标章节生成 — 根据招标要求+企业信息+模板生成技术方案/商务方案
+  bid_section_generate:
+    models: ["deepseek-chat", "qwen-max"]
     temperature: 0.3
-    max_tokens: 4096
-    note: "规程生成质量要求最高，需要严谨的工程语言"
+    max_tokens: 8192
+    note: "投标文件生成质量要求最高，需要严谨的商务文档语言"
 
-  # 规程合规性检查 — 对比生成内容与国标/行标，检查合规性
+  # 招标文件解析 — 结构化提取评分标准/资格要求/废标项
+  tender_parse:
+    models: ["deepseek-chat", "qwen-max"]
+    temperature: 0.1
+    max_tokens: 4096
+    note: "解析精度要求极高，尤其废标项不能遗漏"
+
+  # 投标合规性检查 — 废标风险扫描 + 评分覆盖率分析
   compliance_check:
-    models: ["gemini-3.1-pro-preview", "gemini-2.5-pro"]
+    models: ["deepseek-chat", "qwen-max"]
     temperature: 0.1
     max_tokens: 2048
     note: "安全关键任务，需最高推理精度"
 
   # ===== 知识库与检索 =====
 
-  # 标准规范语义检索 — pgvector 召回后的 re-rank / 摘要
-  standard_retrieval:
-    models: ["gemini-3-flash-preview", "gemini-2.5-flash"]
+  # 食品安全法规检索 — pgvector 召回后的 re-rank / 摘要
+  regulation_retrieval:
+    models: ["deepseek-chat", "qwen-plus"]
     temperature: 0.1
     max_tokens: 1024
 
-  # 知识文档解析 — 标准文件/客户规程入库时的结构化解析
-  knowledge_parse:
-    models: ["gemini-3-flash-preview", "gemini-2.5-flash"]
+  # 投标模板匹配 — 按客户类型（学校/医院/政府）匹配最优模板
+  template_matching:
+    models: ["deepseek-chat", "qwen-plus"]
     temperature: 0.1
     max_tokens: 2048
 
-  # ===== 计算引擎辅助 =====
+  # ===== 报价引擎辅助 =====
 
-  # 计算参数智能提取 — 从自然语言中提取支护/通风/循环参数
-  param_extract:
-    models: ["gemini-3-flash-preview", "gemini-2.5-flash"]
-    temperature: 0.1
-    max_tokens: 512
-    note: "提取精度优先，温度极低"
-
-  # 计算结果安全评估 — 对计算结果进行安全风险评估
-  safety_evaluation:
-    models: ["gemini-3.1-pro-preview", "gemini-2.5-pro"]
-    temperature: 0.1
+  # 报价策略分析 — 基于历史中标数据给出下浮率建议
+  pricing_analysis:
+    models: ["deepseek-chat", "qwen-plus"]
+    temperature: 0.2
     max_tokens: 1024
-    note: "安全评估必须用最强模型"
+
+  # 报价表数据提取 — 从招标文件中提取品类/数量/单位信息
+  quotation_extract:
+    models: ["deepseek-chat", "qwen-plus"]
+    temperature: 0.1
+    max_tokens: 2048
+    note: "提取精度优先，温度极低"
 
   # ===== Embedding =====
 
-  # 向量生成 (1536 维，用于标准条款语义检索)
+  # 向量生成 (1536 维，用于法规/模板语义检索)
   embedding:
-    models: ["gemini-embedding-001", "text-embedding-005"]
+    models: ["gemini-embedding-001", "text-embedding-v3"]

@@ -1,5 +1,6 @@
 """
 应用配置 — 从 .env 环境变量加载
+鲜标智投 — 生鲜食材配送投标文件智能生成平台
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
@@ -15,14 +16,14 @@ class Settings(BaseSettings):
     )
 
     # --- 应用 ---
-    APP_NAME: str = "掘进工作面规程智能生成平台"
-    APP_VERSION: str = "0.1.0"
+    APP_NAME: str = "鲜标智投 — 生鲜食材配送投标文件智能生成平台"
+    APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
     SECRET_KEY: str = "change-me-to-a-random-secret-key-at-least-32-chars"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
 
     # --- 数据库 ---
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/excavation_platform"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/fresh_bid_platform"
 
     # --- Redis ---
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -31,16 +32,40 @@ class Settings(BaseSettings):
     OSS_ENDPOINT: str = ""
     OSS_ACCESS_KEY_ID: str = ""
     OSS_ACCESS_KEY_SECRET: str = ""
-    OSS_BUCKET_NAME: str = "excavation-platform"
+    OSS_BUCKET_NAME: str = "fresh-bid-platform"
 
     # --- CORS ---
     CORS_ORIGINS: List[str] = ["http://localhost:3000"]
 
     # --- AI / LLM ---
+    # 主力：DeepSeek（国产合规，OpenAI 兼容接口）
+    # 开发期可用 Gemini，生产前切换 DeepSeek
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = ""
-    AI_MODEL: str = "gpt-4o-mini"
+    AI_MODEL: str = "deepseek-chat"
+
+    # Gemini（开发期备用）
     GEMINI_API_KEY: str = ""
+
+    # 通义千问（备选/降级）
+    QWEN_API_KEY: str = ""
+    QWEN_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+    # LiteLLM 代理网关（可选，统一路由多模型）
+    LITELLM_BASE_URL: str = ""
+
+    # --- 文档生成 ---
+    # 单次生成允许的最大并发 AI 润色任务数
+    DOC_GEN_MAX_CONCURRENCY: int = 5
+    # 章节生成超时秒数
+    DOC_GEN_CHAPTER_TIMEOUT: int = 60
+
+    # --- 投标业务 ---
+    # 报价下浮率合理区间（默认 5%-15%）
+    QUOTATION_MIN_DISCOUNT: float = 0.05
+    QUOTATION_MAX_DISCOUNT: float = 0.15
+    # 资质证书到期提前预警天数
+    CREDENTIAL_EXPIRY_WARN_DAYS: int = 90
 
 
 # 全局单例

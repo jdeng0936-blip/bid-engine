@@ -2,6 +2,7 @@
 用户反馈飞轮 — 数据模型
 
 采纳/修改/拒绝 差分记录，作为 SFT/RLHF 数据飞轮的核心正负样本积累。
+投标文件的质量改进飞轮：AI生成→用户修改→差异度量化→模型微调参考。
 """
 from sqlalchemy import String, Integer, Float, Text, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column
@@ -15,7 +16,7 @@ class FeedbackLog(AuditMixin, Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("project.id"), nullable=False, comment="关联项目ID"
+        Integer, ForeignKey("bid_project.id"), nullable=False, comment="关联投标项目ID"
     )
     chapter_no: Mapped[str] = mapped_column(
         String(20), nullable=False, comment="章节编号"

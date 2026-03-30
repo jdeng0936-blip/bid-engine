@@ -1,105 +1,213 @@
 # ═══════════════════════════════════════════════════════
-# 规程生成核心 Prompt 注册表 (支持多版本迭代/A/B测试)
+# 投标文件生成核心 Prompt 注册表 — 鲜标智投
+# 支持多版本迭代 / A/B 测试
 # ═══════════════════════════════════════════════════════
 
 prompts:
-  # --- 章节扩写生成 (Phase 1 & 2) ---
-  doc_generation:
-    v1_baseline:
-      version: "1.0"
-      description: "最初版本，仅基于大纲扩写"
-      template: |
-        请编写掘进工作面作业规程的【{chapter_no} {title}】章节的完整正文。
-        
-        == 工程参数 ==
-        {params_text}
-        
-        == 章节大纲框架（必须全部保留并大幅扩展每一条） ==
-        {outline}
-        
-        == 标准库和客户已有规程参考资料（务必深度融合） ==
-        {rag_context}
-        
-        直接输出规程正文，不要输出其他客套话。
-    v2_few_shot:
-      version: "2.0"
-      description: "V2优化版，附带了参数基线、计算文本推导和范文 Few-Shot"
-      template: |
-        请编写掘进工作面作业规程的【{chapter_no} {title}】章节的完整正文。
-        
-        == 工程参数 ==
-        {params_text}
-        
-        == 章节大纲框架（必须全部保留并大幅扩展每一条） ==
-        {outline}
-        
-        {baseline_text}
-        
-        {rag_context_text}
-        
-        {calculation_text}
-        
-        {few_shot_text}
-        
-        直接输出排版优美的专业煤矿规程正文段落。不要任何自我介绍或致谢。
 
-  # --- Critic 自评打分引擎 ---
-  critic_evaluation:
+  # ===== 投标章节生成 =====
+  bid_generation:
     v1_standard:
       version: "1.0"
-      description: "标准 5 项检查表（模糊表述/数值/法规/结构/责任岗）"
+      description: "标准投标章节生成 — 基于招标要求+企业信息+RAG知识库"
       template: |
-        你是煤矿安全规程审核专家。请严格审核以下【{chapter_no} {title}】章节内容，
-        逐条检查以下 5 项质量标准：
-        
-        1. 【模糊表述扫描】：找出所有含"按规定""根据实际""按要求""视情况"等模糊词的条款，
-        给出条款编号和具体位置。如无模糊表述，写"无"。
-        
-        2. 【数值标准检查】：检查是否每条技术措施都有具体数值（距离mm/m、压力MPa、浓度%、
-        时间min/h等）。列出缺少数值标准的条款。
-        
-        3. 【法规引用检查】：统计已引用的法规条款数量。如不足 3 条法规引用，
-        列出应补充引用的具体法规和适用条款。
-        
-        4. 【结构完整性】：检查是否按"一般规定→操作步骤→质量标准→注意事项→应急处置"展开。
-        指出缺失的结构块。
-        
-        5. 【责任岗位检查】：检查关键操作措施是否明确了责任岗位。列出缺失责任人的条款。
-        
-        == 待审核内容 ==
-        {content}
-        
-        == 输出格式（严格遵循） ==
-        SCORE: X/10（整体质量评分）
-        ISSUES_COUNT: N（发现问题总数）
-        FIXES:
-        - [条款位置]: 问题描述 → 修正建议
-        - [条款位置]: 问题描述 → 修正建议
-        ...
-        
-        如果整体评分 >= 8/10 且无严重问题，直接输出：
-        SCORE: X/10
-        ISSUES_COUNT: 0
-        PASS
+        请编写生鲜食材配送投标文件的【{chapter_no} {title}】章节完整正文。
 
-  # --- 跨章节一致性扫描 ---
-  consistency_scan:
-    v1_keyword:
-      version: "1.0"
-      description: "跨章节检查断层、设备、编制、水/瓦斯、尺寸矛盾"
+        == 招标项目信息 ==
+        采购方：{buyer_name}（{customer_type}）
+        项目名称：{project_name}
+        预算金额：{budget}元
+        配送范围：{delivery_scope}
+
+        == 投标企业信息 ==
+        {enterprise_info}
+
+        == 本章节对应评分标准（必须逐条覆盖）==
+        {scoring_criteria}
+
+        == 章节大纲框架（必须全部保留并充分展开）==
+        {outline}
+
+        == 知识库参考（食品安全法规/冷链标准/行业模板）==
+        {rag_context}
+
+        == 历史中标方案参考 ==
+        {similar_cases}
+
+        要求：
+        1. 语言专业正式，符合政府采购投标文件规范
+        2. 每项技术指标必须有具体数值（禁止写"按规定""视情况""根据实际"）
+        3. 食品安全措施必须覆盖：留样制度(≥72h)/全程追溯/农残检测/健康证管理
+        4. 冷链参数必须符合 GB/T 22918 标准（冷藏0-4℃/冷冻≤-18℃）
+        5. 配送承诺必须量化：准时率/破损率/满意率/响应时间
+        6. 体现投标企业独特优势和差异化竞争力
+        7. 引用法规条款时标注来源（如《食品安全法》第XX条）
+
+        直接输出排版优美的投标文件正文段落，不输出任何自我介绍或致谢。
+
+    v2_with_images:
+      version: "2.0"
+      description: "V2增强版 — 支持图片引用标记和表格生成"
       template: |
-        你是煤矿规程审核专家。以下是同一份规程各章节的摘要。
-        请检查各章节之间的数据一致性，找出矛盾点：
+        请编写生鲜食材配送投标文件的【{chapter_no} {title}】章节完整正文。
+
+        == 招标项目信息 ==
+        {project_info}
+
+        == 投标企业信息 ==
+        {enterprise_info}
+
+        == 评分标准 ==
+        {scoring_criteria}
+
+        == 章节大纲 ==
+        {outline}
+
+        == 知识库参考 ==
+        {rag_context}
+
+        == 可用图片资源（在正文适当位置插入引用标记）==
+        {available_images}
+
+        要求：
+        1. 所有技术规范同V1要求
+        2. 在需要插入图片的位置使用标记格式：[[IMG:图片ID:图片说明文字]]
+        3. 在需要表格的位置使用标记格式：[[TABLE:表格标题]]后跟Markdown表格
+        4. 插图建议位置：冷链车辆、仓库温区、检测设备、配送流程图、组织架构图
+
+        直接输出投标文件正文。
+
+  # ===== 招标文件解析 =====
+  tender_parse:
+    v1_structured:
+      version: "1.0"
+      description: "招标文件结构化解析 — 提取资格要求/评分标准/废标项"
+      template: |
+        你是专业的招标文件分析师，请仔细阅读以下招标文件内容，
+        提取并结构化输出关键信息。
+
+        == 招标文件原文 ==
+        {tender_content}
+
+        请严格按照以下 JSON 格式输出：
+        {{
+          "project_name": "项目名称",
+          "buyer_name": "采购方名称",
+          "customer_type": "school/hospital/government/enterprise",
+          "budget_amount": 数字（元）,
+          "deadline": "YYYY-MM-DD HH:MM",
+          "tender_type": "open/invite/negotiate",
+          "delivery_scope": "配送范围描述",
+
+          "disqualification_items": [
+            {{"content": "废标条件1", "severity": "fatal"}},
+            ...
+          ],
+
+          "qualification_requirements": [
+            {{"content": "资格要求1", "is_mandatory": true}},
+            ...
+          ],
+
+          "technical_requirements": [
+            {{"content": "技术要求1", "category": "cold_chain/food_safety/delivery/quality"}},
+            ...
+          ],
+
+          "scoring_criteria": [
+            {{"item": "评分项名称", "max_score": 分数, "weight": 百分比, "description": "评分说明"}},
+            ...
+          ],
+
+          "commercial_requirements": [
+            {{"content": "商务要求1"}},
+            ...
+          ],
+
+          "quotation_format": {{
+            "discount_rate_required": true/false,
+            "categories": ["蔬菜", "肉类", ...],
+            "pricing_method": "固定单价/下浮率/综合评标价"
+          }}
+        }}
+
+        注意：
+        1. 废标项是最关键的信息，必须逐条提取，不能遗漏任何一条
+        2. 如果招标文件中未明确某项，值填写 null
+        3. severity 只有 "fatal"（废标）和 "warning"（扣分）两种
+
+  # ===== 合规性审查 =====
+  compliance_review:
+    v1_five_dimension:
+      version: "1.0"
+      description: "5维合规审查 — 废标/资格/评分覆盖/报价/食安"
+      template: |
+        你是食材配送投标领域的合规审查专家。请严格审核以下投标文件内容，
+        逐条检查以下 5 个维度的合规性：
+
+        == 招标方资格要求 ==
+        {qualification_requirements}
+
+        == 废标条件 ==
+        {disqualification_items}
+
+        == 评分标准 ==
+        {scoring_criteria}
+
+        == 投标文件技术方案内容 ==
+        {bid_content}
+
+        == 企业已有资质清单 ==
+        {credentials_list}
+
+        == 报价信息 ==
+        {quotation_summary}
+
+        请按以下5个维度逐一审查：
+
+        1.【🔴 废标项扫描】逐条对照废标条件，检查是否全部满足
+        2.【🔴 资格证件完整性】比对必需证照 vs 企业已有证照，列出缺口
+        3.【🟡 评分覆盖率】每个评分项在技术方案中是否有对应内容
+        4.【🟡 报价格式合规】报价格式/小数位/货币/汇总是否符合要求
+        5.【🟠 食品安全要素】留样/追溯/农残/健康证/HACCP 是否覆盖
+
+        == 输出格式 ==
+        COMPLIANCE_SCORE: X/100
+        FATAL_ISSUES: N（致命问题数，任一存在即判定不合格）
+        WARNING_ISSUES: N（警告问题数）
         
-        检查项：
-        1. 断层数量和参数是否各章一致
-        2. 设备型号是否前后统一
-        3. 人员编制数量是否一致
-        4. 涌水量/瓦斯参数是否一致
-        5. 巷道尺寸/断面参数是否一致
+        DIMENSION_1_DISQUALIFICATION:
+        - [条目]: 状态(✅通过/❌不满足) → 修正建议
         
-        {summaries}
+        DIMENSION_2_CREDENTIALS:
+        - [证照名称]: ✅已有(有效期至YYYY-MM-DD) / ❌缺失 → 办理建议
         
-        如果发现矛盾，输出格式：
-        INCONSISTENCY: [章节A] 说"XXX" vs [章节B] 说"YYY" → 应统一为"ZZZ"
-        如果无矛盾，输出：CONSISTENT
+        DIMENSION_3_SCORING:
+        - [评分项](XX分): 覆盖率XX% → 补充建议
+        
+        DIMENSION_4_QUOTATION:
+        - [检查项]: ✅合规 / ❌不合规 → 修正建议
+        
+        DIMENSION_5_FOOD_SAFETY:
+        - [安全要素]: ✅已覆盖 / ❌缺失 → 必须补充内容
+
+  # ===== 报价策略分析 =====
+  pricing_strategy:
+    v1_analysis:
+      version: "1.0"
+      description: "报价策略分析 — 基于客户类型和预算给出下浮率建议"
+      template: |
+        请基于以下信息，给出食材配送投标的报价策略建议：
+
+        采购方类型：{customer_type}
+        项目预算：{budget}元
+        配送品类：{categories}
+        竞争态势：{competition_info}
+        历史中标下浮率参考：
+        {historical_discount_rates}
+
+        请输出：
+        1. 建议下浮率区间及理由
+        2. 各品类定价注意事项
+        3. 报价风险提示（低于成本/超预算）
+        4. 差异化报价策略建议

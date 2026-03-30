@@ -23,6 +23,11 @@ from app.models.feedback import *  # noqa: F401,F403
 from app.models.dict_item import *  # noqa: F401,F403
 from app.models.equipment import *  # noqa: F401,F403
 from app.models.chat import *  # noqa: F401,F403
+from app.models.enterprise import *  # noqa: F401,F403
+from app.models.bid_project import *  # noqa: F401,F403
+from app.models.credential import *  # noqa: F401,F403
+from app.models.quotation import *  # noqa: F401,F403
+from app.models.image_asset import *  # noqa: F401,F403
 
 from app.api.v1.health import router as health_router
 from app.api.v1.auth import router as auth_router
@@ -39,6 +44,11 @@ from app.api.v1.system import router as system_router
 from app.api.v1.feedback import router as feedback_router
 from app.api.v1.equipment import router as equipment_router
 from app.api.v1.chat import router as chat_router
+from app.api.v1.enterprise import router as enterprise_router
+from app.api.v1.bid_project import router as bid_project_router
+from app.api.v1.credential import router as credential_router
+from app.api.v1.quotation import router as quotation_router
+from app.api.v1.image_asset import router as image_asset_router
 
 
 async def _init_db():
@@ -103,7 +113,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="煤矿掘进工作面作业规程智能生成平台 API",
+    description="鲜标智投 — 生鲜食材配送投标智能平台 API",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
@@ -134,4 +144,9 @@ app.include_router(system_router, prefix="/api/v1")
 app.include_router(feedback_router, prefix="/api/v1")
 app.include_router(equipment_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
+app.include_router(enterprise_router, prefix="/api/v1")
+app.include_router(bid_project_router, prefix="/api/v1")
+app.include_router(credential_router, prefix="/api/v1")
+app.include_router(quotation_router, prefix="/api/v1")
+app.include_router(image_asset_router, prefix="/api/v1")
 

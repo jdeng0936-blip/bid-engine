@@ -1,15 +1,15 @@
-# Docker Compose 编排 — 掘进工作面规程智能生成平台
+# Docker Compose 编排 — 鲜标智投 · 生鲜食材配送投标文件智能生成平台
 # 一键启动：docker compose up -d
-name: excavation-platform
+name: fresh-bid-platform
 
 services:
   # --- PostgreSQL 16 + pgvector ---
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: excavation-postgres
+    container_name: fresh-bid-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: excavation_platform
+      POSTGRES_DB: fresh_bid_platform
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
@@ -24,7 +24,7 @@ services:
   # --- Redis Stack ---
   redis:
     image: redis/redis-stack-server:latest
-    container_name: excavation-redis
+    container_name: fresh-bid-redis
     restart: unless-stopped
     ports:
       - "127.0.0.1:6380:6379"
@@ -36,12 +36,12 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: excavation-api
+    container_name: fresh-bid-api
     restart: unless-stopped
     env_file: ./backend/.env
     # 容器内覆盖：数据库/Redis 使用服务名而非 localhost
     environment:
-      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/excavation_platform"
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/fresh_bid_platform"
       REDIS_URL: "redis://redis:6379/0"
       CORS_ORIGINS: '["http://localhost","http://localhost:3000","http://localhost:80"]'
     expose:
@@ -62,7 +62,7 @@ services:
       args:
         # 构建时注入：浏览器端 API 通过 Nginx 反代（相对路径）
         NEXT_PUBLIC_API_URL: "/api/v1"
-    container_name: excavation-web
+    container_name: fresh-bid-web
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: "/api/v1"
@@ -74,7 +74,7 @@ services:
   # --- Nginx 反代网关 ---
   nginx:
     image: nginx:alpine
-    container_name: excavation-nginx
+    container_name: fresh-bid-nginx
     restart: unless-stopped
     ports:
       - "80:80"
