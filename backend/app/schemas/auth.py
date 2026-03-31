@@ -11,6 +11,15 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    """注册请求 — 新用户注册同时创建租户"""
+    username: str
+    password: str
+    confirm_password: str
+    real_name: str = ""
+    enterprise_name: str = ""  # 企业名称，注册时自动创建租户
+
+
 class TokenResponse(BaseModel):
     """登录成功返回 Token"""
     access_token: str

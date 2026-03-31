@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
 from app.core.deps import get_current_user_payload, get_tenant_id
+from app.core.security import require_role
 from app.schemas.common import ApiResponse, PaginatedData
 from app.schemas.system import (
     UserCreate, UserUpdate, UserOut, PasswordReset,
@@ -51,6 +52,7 @@ async def list_users(
 @router.post("/users", response_model=ApiResponse[UserOut], status_code=201)
 async def create_user(
     body: UserCreate,
+    _admin = require_role("管理员"),
     payload: dict = Depends(get_current_user_payload),
     tenant_id: int = Depends(get_tenant_id),
     session: AsyncSession = Depends(get_async_session),
@@ -92,6 +94,7 @@ async def update_user(
 @router.put("/users/{user_id}/toggle", response_model=ApiResponse[UserOut])
 async def toggle_user(
     user_id: int,
+    _admin=require_role("管理员"),
     tenant_id: int = Depends(get_tenant_id),
     session: AsyncSession = Depends(get_async_session),
 ):
