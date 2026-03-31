@@ -75,6 +75,7 @@ async def create_user(
 async def update_user(
     user_id: int,
     body: UserUpdate,
+    _admin=require_role("管理员"),
     tenant_id: int = Depends(get_tenant_id),
     session: AsyncSession = Depends(get_async_session),
 ):
@@ -115,6 +116,7 @@ async def toggle_user(
 async def reset_password(
     user_id: int,
     body: PasswordReset,
+    _admin=require_role("管理员"),
     tenant_id: int = Depends(get_tenant_id),
     session: AsyncSession = Depends(get_async_session),
 ):
@@ -143,6 +145,7 @@ async def list_roles(
 @router.post("/roles", response_model=ApiResponse[RoleOut], status_code=201)
 async def create_role(
     body: RoleCreate,
+    _admin=require_role("管理员"),
     payload: dict = Depends(get_current_user_payload),
     tenant_id: int = Depends(get_tenant_id),
     session: AsyncSession = Depends(get_async_session),
@@ -158,6 +161,7 @@ async def create_role(
 async def update_role(
     role_id: int,
     body: RoleUpdate,
+    _admin=require_role("管理员"),
     tenant_id: int = Depends(get_tenant_id),
     session: AsyncSession = Depends(get_async_session),
 ):
@@ -173,6 +177,7 @@ async def update_role(
 @router.delete("/roles/{role_id}", response_model=ApiResponse)
 async def delete_role(
     role_id: int,
+    _admin=require_role("管理员"),
     tenant_id: int = Depends(get_tenant_id),
     session: AsyncSession = Depends(get_async_session),
 ):
@@ -235,6 +240,7 @@ async def list_dict_types(
 @router.post("/dicts", response_model=ApiResponse[DictItemOut], status_code=201)
 async def create_dict(
     body: DictItemCreate,
+    _admin=require_role("管理员"),
     payload: dict = Depends(get_current_user_payload),
     tenant_id: int = Depends(get_tenant_id),
     session: AsyncSession = Depends(get_async_session),
@@ -265,6 +271,7 @@ async def update_dict(
 @router.delete("/dicts/{item_id}", response_model=ApiResponse)
 async def delete_dict(
     item_id: int,
+    _admin=require_role("管理员"),
     tenant_id: int = Depends(get_tenant_id),
     session: AsyncSession = Depends(get_async_session),
 ):

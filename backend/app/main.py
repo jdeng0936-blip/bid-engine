@@ -1,12 +1,25 @@
 """
 FastAPI 应用入口
 """
+import logging
+import time
+import traceback
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from app.core.config import settings
+
+# ========== 结构化日志配置 ==========
+logging.basicConfig(
+    level=logging.DEBUG if settings.DEBUG else logging.INFO,
+    format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("freshbid")
 from app.core.database import engine, async_session_factory
 from app.models.base import Base
 
@@ -112,6 +125,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- 全局异常处理 ---
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """未捕获异常统一返回 JSON 格式，避免暴露堆栈"""
+    logger.error(f"未处理异常 | {request.method} {request.url.path} | {type(exc).__name__}: {exc}")
+    if settings.DEBUG:
+        logger.error(traceback.format_exc())
+    return JSONResponse(
+        status_code=500,
+        content={"code": 500, "message": "服务器内部错误", "data": None},
+    )
+
+
+# --- 请求耗时日志 ---
+@app.middleware("http")
+async def log_request_time(request: Request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    duration = round((time.time() - start) * 1000, 1)
+    if duration > 1000:  # 慢请求（>1s）告警
+        logger.warning(f"慢请求 | {request.method} {request.url.path} | {duration}ms")
+    elif not request.url.path.startswith("/api/v1/health"):
+        logger.info(f"{request.method} {request.url.path} | {response.status_code} | {duration}ms")
+    return response
+
 
 # --- 注册路由 ---
 app.include_router(health_router, prefix="/api/v1")
