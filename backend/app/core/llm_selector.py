@@ -1,29 +1,36 @@
 """
-LLM 模型统一选择器 — 从 llm_registry.yaml 读取模型名 + fallback 链
+LLM 模型统一选择器 — 多 Provider 路由
+
+注册表格式升级:
+  models: ["provider/model_name", ...]
+  例: "openai/gpt-5.4" → 使用 OPENAI_API_KEY + OPENAI_BASE_URL
+  例: "gemini/gemini-3.1" → 使用 GEMINI_API_KEY + GEMINI_BASE_URL
 
 架构红线：
-  - 所有 LLM 调用必须通过 LLMSelector.get_model("task_type") 获取模型名
-  - 严禁在业务代码中硬编码模型名
-  - 首选模型不可用时自动回退到 fallback 链中的下一个模型
+  - 所有 LLM 调用必须通过 LLMSelector 获取模型名和客户端配置
+  - 严禁在业务代码中硬编码模型名或 API Key
+  - 向后兼容: 不带 provider 前缀的模型名默认走 OPENAI_* 配置
 
 使用示例:
     from app.core.llm_selector import LLMSelector
 
-    model = LLMSelector.get_model("bid_section_generate")
-    config = LLMSelector.get_config("tender_parse")
+    # 获取模型名（纯字符串，用于 API 调用的 model 参数）
+    model = LLMSelector.get_model("bid_section_generate")  # → "gpt-5.4"
+
+    # 获取完整客户端配置（含 api_key + base_url）
+    client_cfg = LLMSelector.get_client_config("bid_section_generate")
+    # → {"api_key": "sk-xxx", "base_url": "https://api.openai.com/v1", "model": "gpt-5.4"}
 """
 import os
 from typing import Optional
 
 import yaml
 
-# llm_registry.yaml 文件路径
 _REGISTRY_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "llm_registry.yaml",
 )
 
-# 缓存，避免每次调用都读文件
 _registry_cache: Optional[dict] = None
 _registry_mtime: float = 0.0
 
@@ -39,7 +46,6 @@ def _load_registry() -> dict:
             return _registry_cache
         raise FileNotFoundError(f"LLM 注册表不存在: {_REGISTRY_PATH}")
 
-    # 文件未修改，直接返回缓存
     if _registry_cache is not None and current_mtime == _registry_mtime:
         return _registry_cache
 
@@ -51,59 +57,132 @@ def _load_registry() -> dict:
     return data
 
 
-class LLMSelector:
-    """LLM 模型统一选择器
+def _parse_model_ref(model_ref: str) -> tuple[str, str]:
+    """解析 'provider/model_name' 格式
 
-    从 llm_registry.yaml 按 task_type 读取模型配置，
-    支持 fallback 链和热更新（文件修改后自动重新加载）。
+    Returns:
+        (provider, model_name)
+        无 provider 前缀时默认 provider="openai"
+    """
+    if "/" in model_ref:
+        provider, model_name = model_ref.split("/", 1)
+        return provider, model_name
+    return "openai", model_ref
+
+
+def _get_provider_config(provider: str) -> dict:
+    """根据 provider 名获取 API Key + Base URL
+
+    从 settings 中读取对应 provider 的配置。
+    """
+    from app.core.config import settings
+
+    configs = {
+        "openai": {
+            "api_key": settings.OPENAI_API_KEY,
+            "base_url": settings.OPENAI_BASE_URL,
+        },
+        "gemini": {
+            "api_key": settings.GEMINI_API_KEY,
+            "base_url": settings.GEMINI_BASE_URL,
+        },
+        "deepseek": {
+            "api_key": settings.DEEPSEEK_API_KEY or settings.OPENAI_API_KEY,
+            "base_url": settings.DEEPSEEK_BASE_URL,
+        },
+        "qwen": {
+            "api_key": settings.QWEN_API_KEY or settings.OPENAI_API_KEY,
+            "base_url": settings.QWEN_BASE_URL,
+        },
+    }
+    return configs.get(provider, configs["openai"])
+
+
+class LLMSelector:
+    """LLM 模型统一选择器 — 多 Provider 路由
+
+    从 llm_registry.yaml 按 task_type 读取 "provider/model" 配置，
+    返回模型名和对应 provider 的客户端参数。
     """
 
     @staticmethod
     def get_model(task_type: str) -> str:
-        """获取指定任务类型的首选模型名
-
-        Args:
-            task_type: 任务类型（如 "bid_section_generate", "tender_parse"）
+        """获取首选模型名（纯模型 ID，不含 provider 前缀）
 
         Returns:
-            模型名字符串（如 "deepseek-chat"）
-
-        Raises:
-            KeyError: task_type 不存在于注册表中
-            ValueError: task_type 存在但 models 列表为空
+            "gpt-5.4" / "gemini-3.1" 等
         """
         config = LLMSelector.get_config(task_type)
         models = config.get("models", [])
         if not models:
             raise ValueError(f"任务 '{task_type}' 的 models 列表为空")
-        return models[0]
+        _, model_name = _parse_model_ref(models[0])
+        return model_name
 
     @staticmethod
-    def get_all_models(task_type: str) -> list[str]:
-        """获取指定任务类型的全部 fallback 模型列表
-
-        Args:
-            task_type: 任务类型
+    def get_provider(task_type: str) -> str:
+        """获取首选模型的 provider 名
 
         Returns:
-            模型名列表（按优先级排序）
+            "openai" / "gemini" / "deepseek" / "qwen"
         """
         config = LLMSelector.get_config(task_type)
-        return config.get("models", [])
+        models = config.get("models", [])
+        if not models:
+            raise ValueError(f"任务 '{task_type}' 的 models 列表为空")
+        provider, _ = _parse_model_ref(models[0])
+        return provider
+
+    @staticmethod
+    def get_client_config(task_type: str) -> dict:
+        """获取完整的客户端配置（api_key + base_url + model）
+
+        Returns:
+            {"api_key": "sk-xxx", "base_url": "https://...", "model": "gpt-5.4"}
+
+        用法:
+            cfg = LLMSelector.get_client_config("bid_section_generate")
+            client = AsyncOpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"])
+            response = await client.chat.completions.create(model=cfg["model"], ...)
+        """
+        config = LLMSelector.get_config(task_type)
+        models = config.get("models", [])
+        if not models:
+            raise ValueError(f"任务 '{task_type}' 的 models 列表为空")
+
+        provider, model_name = _parse_model_ref(models[0])
+        provider_cfg = _get_provider_config(provider)
+
+        return {
+            "api_key": provider_cfg["api_key"],
+            "base_url": provider_cfg["base_url"],
+            "model": model_name,
+            "provider": provider,
+        }
+
+    @staticmethod
+    def get_all_models(task_type: str) -> list[dict]:
+        """获取 fallback 链中所有模型的配置
+
+        Returns:
+            [{"provider": "openai", "model": "gpt-5.4", "api_key": ..., "base_url": ...}, ...]
+        """
+        config = LLMSelector.get_config(task_type)
+        result = []
+        for ref in config.get("models", []):
+            provider, model_name = _parse_model_ref(ref)
+            provider_cfg = _get_provider_config(provider)
+            result.append({
+                "provider": provider,
+                "model": model_name,
+                "api_key": provider_cfg["api_key"],
+                "base_url": provider_cfg["base_url"],
+            })
+        return result
 
     @staticmethod
     def get_config(task_type: str) -> dict:
-        """获取指定任务类型的完整配置
-
-        Args:
-            task_type: 任务类型
-
-        Returns:
-            配置字典，包含 models, temperature, max_tokens 等
-
-        Raises:
-            KeyError: task_type 不存在于注册表中
-        """
+        """获取指定任务类型的完整配置"""
         registry = _load_registry()
         tasks = registry.get("tasks", {})
         if task_type not in tasks:
@@ -115,18 +194,15 @@ class LLMSelector:
 
     @staticmethod
     def get_temperature(task_type: str) -> float:
-        """获取指定任务类型的 temperature 配置"""
         config = LLMSelector.get_config(task_type)
         return float(config.get("temperature", 0.3))
 
     @staticmethod
     def get_max_tokens(task_type: str) -> int:
-        """获取指定任务类型的 max_tokens 配置"""
         config = LLMSelector.get_config(task_type)
         return int(config.get("max_tokens", 2048))
 
     @staticmethod
     def list_task_types() -> list[str]:
-        """列出所有可用的任务类型"""
         registry = _load_registry()
         return list(registry.get("tasks", {}).keys())

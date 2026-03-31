@@ -163,20 +163,18 @@ class AIRouter:
     """AI 智能路由引擎"""
 
     def __init__(self, session: Optional[AsyncSession] = None, tenant_id: int = 0, industry_type: str = "fresh_food"):
-        # 通过 LLMSelector 获取 tool_calling 任务的模型配置（架构红线：禁止硬编码模型名）
-        from app.core.config import settings
+        # 通过 LLMSelector 获取 tool_calling 任务的客户端配置（多 Provider 路由）
         from app.core.llm_selector import LLMSelector
 
-        api_key = settings.OPENAI_API_KEY or settings.GEMINI_API_KEY
-        base_url = settings.OPENAI_BASE_URL or None
-        self.model = LLMSelector.get_model("tool_calling")
-        self.session = session  # 数据库 session（用于向量检索）
+        cfg = LLMSelector.get_client_config("tool_calling")
+        self.model = cfg["model"]
+        self.session = session
         self.tenant_id = tenant_id
         self.industry_type = industry_type
 
-        client_kwargs = {"api_key": api_key}
-        if base_url:
-            client_kwargs["base_url"] = base_url
+        client_kwargs = {"api_key": cfg["api_key"]}
+        if cfg["base_url"]:
+            client_kwargs["base_url"] = cfg["base_url"]
 
         self.client = AsyncOpenAI(**client_kwargs)
 

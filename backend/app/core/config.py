@@ -37,17 +37,24 @@ class Settings(BaseSettings):
     # --- CORS ---
     CORS_ORIGINS: List[str] = ["http://localhost:3000"]
 
-    # --- AI / LLM ---
-    # 主力：DeepSeek（国产合规，OpenAI 兼容接口）
-    # 开发期可用 Gemini，生产前切换 DeepSeek
+    # --- AI / LLM 多 Provider 配置 ---
+    # 每个 Provider 独立配置 API Key + Base URL
+    # llm_registry.yaml 中通过 provider 字段路由到对应配置
+
+    # Provider: openai（GPT 系列）
     OPENAI_API_KEY: str = ""
-    OPENAI_BASE_URL: str = ""
-    AI_MODEL: str = "deepseek-chat"
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    AI_MODEL: str = "gpt-5.4"
 
-    # Gemini（开发期备用）
+    # Provider: gemini（通过 OpenAI 兼容端点）
     GEMINI_API_KEY: str = ""
+    GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai"
 
-    # 通义千问（备选/降级）
+    # Provider: deepseek（国产合规）
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
+
+    # Provider: qwen（通义千问，备选）
     QWEN_API_KEY: str = ""
     QWEN_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 

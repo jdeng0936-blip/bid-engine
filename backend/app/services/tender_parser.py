@@ -167,14 +167,14 @@ class TenderParseService:
         from openai import AsyncOpenAI
 
         # 加载 LLM 任务配置
-        task_config = LLMSelector.get_config("tender_parse")
-        model = (task_config.get("models") or [settings.AI_MODEL])[0]
-        temperature = task_config.get("temperature", 0.1)
-        max_tokens = task_config.get("max_tokens", 4096)
+        cfg = LLMSelector.get_client_config("tender_parse")
+        model = cfg["model"]
+        temperature = LLMSelector.get_temperature("tender_parse")
+        max_tokens = LLMSelector.get_max_tokens("tender_parse")
 
         client = AsyncOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL or None,
+            api_key=cfg["api_key"],
+            base_url=cfg["base_url"] or None,
         )
 
         chunks = _chunk_text(text)

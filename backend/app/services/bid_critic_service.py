@@ -30,18 +30,14 @@ class BidCriticService:
     """
 
     def __init__(self):
-        """初始化 Critic 服务"""
-        config = LLMSelector.get_config("compliance_check")
-        model = (config.get("models") or ["deepseek-chat"])[0]
-        self.model = model
-        self.temperature = config.get("temperature", 0.1)
+        """初始化 Critic 服务（多 Provider 路由）"""
+        cfg = LLMSelector.get_client_config("compliance_check")
+        self.model = cfg["model"]
+        self.temperature = LLMSelector.get_temperature("compliance_check")
 
-        api_key = settings.OPENAI_API_KEY or settings.GEMINI_API_KEY
-        base_url = settings.OPENAI_BASE_URL or None
-
-        client_kwargs = {"api_key": api_key}
-        if base_url:
-            client_kwargs["base_url"] = base_url
+        client_kwargs = {"api_key": cfg["api_key"]}
+        if cfg["base_url"]:
+            client_kwargs["base_url"] = cfg["base_url"]
         self.client = AsyncOpenAI(**client_kwargs)
 
     async def critic_and_rewrite(

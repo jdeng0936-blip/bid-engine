@@ -540,13 +540,13 @@ async def rewrite_selection(
 - 保持 Markdown 格式（如有标题、列表等）"""
 
     try:
-        model = LLMSelector.get_model("bid_section_generate")
+        cfg = LLMSelector.get_client_config("bid_section_generate")
         client = AsyncOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL or None,
+            api_key=cfg["api_key"],
+            base_url=cfg["base_url"] or None,
         )
         response = await client.chat.completions.create(
-            model=model,
+            model=cfg["model"],
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4,
             max_tokens=4096,

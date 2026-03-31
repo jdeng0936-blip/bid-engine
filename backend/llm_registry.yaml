@@ -1,33 +1,24 @@
 # ═══════════════════════════════════════════════════════
-# LLM 模型注册表 — 鲜标智投 · 生鲜食材配送投标文件智能生成平台
+# LLM 模型注册表 — 鲜标智投 · 多 Provider 路由
 # ═══════════════════════════════════════════════════════
 #
 # 规则：
 # 1. 业务代码严禁硬编码模型名，必须通过 task_type 查表
-# 2. 每个 task_type 配置 models 列表，按优先级排序
-# 3. 首选模型失败时，自动 fallback 到下一个
-# 4. 修改此文件即可全局切换模型，无需改代码
-#
-# 合规要求（P0红线）：
-#   - 生产环境仅允许使用国产大模型（DeepSeek/通义千问/文心）
-#   - Gemini/GPT 仅限本地开发调试
-#   - 投标数据禁止发送至境外服务器
+# 2. 每个 task_type 的 models 列表中，格式为 "provider/model_name"
+# 3. provider 决定使用哪组 API Key + Base URL（见 config.py）
+# 4. 首选模型失败时，自动 fallback 到下一个
+# 5. 修改此文件即可全局切换模型，无需改代码
 
-# --- 模型可用清单 ---
+# --- Provider 配置说明 ---
 #
-#   国产合规模型（生产环境）:
-#     - deepseek-chat              # DeepSeek-V3，性价比最优
-#     - deepseek-reasoner          # DeepSeek-R1，深度推理
-#     - qwen-max                   # 通义千问最强版
-#     - qwen-plus                  # 通义千问性价比版
+#   openai:    → OPENAI_API_KEY + OPENAI_BASE_URL (GPT 系列)
+#   gemini:    → GEMINI_API_KEY + GEMINI_BASE_URL (Google)
+#   deepseek:  → DEEPSEEK_API_KEY + DEEPSEEK_BASE_URL (国产合规)
+#   qwen:      → QWEN_API_KEY + QWEN_BASE_URL (通义千问)
 #
-#   开发调试模型（仅限本地）:
-#     - gemini-2.5-flash           # Google 快速推理
-#     - gemini-2.5-pro             # Google 强推理
-#
-#   Embedding:
-#     - gemini-embedding-001       # 开发期（已有Key）
-#     - text-embedding-v3          # 通义千问 embedding（生产替换）
+# 模型名格式: "provider/model_id"
+#   例: "openai/gpt-5.4" → 使用 OPENAI_API_KEY 调 gpt-5.4
+#   例: "gemini/gemini-3.1" → 使用 GEMINI_API_KEY 调 gemini-3.1
 
 # --- 任务路由表 ---
 tasks:
@@ -36,77 +27,71 @@ tasks:
 
   # AI 路由引擎 — Tool Calling 意图识别 + 8大投标工具调度
   tool_calling:
-    models: ["deepseek-chat", "qwen-max", "gemini-2.5-flash"]
+    models: ["openai/gpt-5.4", "gemini/gemini-3.1", "deepseek/deepseek-chat"]
     temperature: 0.1
     max_tokens: 1024
-    note: "核心路由，要求工具调用准确率最高，优先用最强模型"
+    note: "核心路由，要求工具调用准确率最高"
 
   # AI 对话 — 投标智能助手通用会话
   chat:
-    models: ["deepseek-chat", "qwen-plus", "gemini-2.5-flash"]
+    models: ["gemini/gemini-3.1", "openai/gpt-5.4", "deepseek/deepseek-chat"]
     temperature: 0.5
     max_tokens: 2048
 
-  # 工具结果解读 — LLM 解读招标解析/报价计算/合规检查结果
+  # 工具结果解读
   tool_result_interpret:
-    models: ["deepseek-chat", "qwen-plus"]
+    models: ["gemini/gemini-3.1", "openai/gpt-5.4"]
     temperature: 0.3
     max_tokens: 2048
 
   # ===== 投标文档生成 =====
 
-  # 投标章节生成 — 根据招标要求+企业信息+模板生成技术方案/商务方案
+  # 投标章节生成 — GPT-5.4 主力（商务文档最强）
   bid_section_generate:
-    models: ["deepseek-chat", "qwen-max"]
+    models: ["openai/gpt-5.4", "gemini/gemini-3.1", "deepseek/deepseek-chat"]
     temperature: 0.3
     max_tokens: 8192
-    note: "投标文件生成质量要求最高，需要严谨的商务文档语言"
+    note: "投标文件生成质量要求最高，GPT-5.4 商务文档能力强"
 
-  # 招标文件解析 — 结构化提取评分标准/资格要求/废标项
+  # 招标文件解析 — 结构化提取
   tender_parse:
-    models: ["deepseek-chat", "qwen-max"]
+    models: ["openai/gpt-5.4", "gemini/gemini-3.1"]
     temperature: 0.1
     max_tokens: 4096
     note: "解析精度要求极高，尤其废标项不能遗漏"
 
-  # 投标合规性检查 — 废标风险扫描 + 评分覆盖率分析
+  # 投标合规性检查 — 安全关键
   compliance_check:
-    models: ["deepseek-chat", "qwen-max"]
+    models: ["openai/gpt-5.4", "gemini/gemini-3.1"]
     temperature: 0.1
     max_tokens: 2048
     note: "安全关键任务，需最高推理精度"
 
   # ===== 知识库与检索 =====
 
-  # 食品安全法规检索 — pgvector 召回后的 re-rank / 摘要
   regulation_retrieval:
-    models: ["deepseek-chat", "qwen-plus"]
+    models: ["gemini/gemini-3.1", "openai/gpt-5.4"]
     temperature: 0.1
     max_tokens: 1024
 
-  # 投标模板匹配 — 按客户类型（学校/医院/政府）匹配最优模板
   template_matching:
-    models: ["deepseek-chat", "qwen-plus"]
+    models: ["gemini/gemini-3.1", "openai/gpt-5.4"]
     temperature: 0.1
     max_tokens: 2048
 
   # ===== 报价引擎辅助 =====
 
-  # 报价策略分析 — 基于历史中标数据给出下浮率建议
   pricing_analysis:
-    models: ["deepseek-chat", "qwen-plus"]
+    models: ["gemini/gemini-3.1", "openai/gpt-5.4"]
     temperature: 0.2
     max_tokens: 1024
 
-  # 报价表数据提取 — 从招标文件中提取品类/数量/单位信息
   quotation_extract:
-    models: ["deepseek-chat", "qwen-plus"]
+    models: ["openai/gpt-5.4", "gemini/gemini-3.1"]
     temperature: 0.1
     max_tokens: 2048
-    note: "提取精度优先，温度极低"
 
   # ===== Embedding =====
 
-  # 向量生成 (1536 维，用于法规/模板语义检索)
   embedding:
-    models: ["gemini-embedding-001", "text-embedding-v3"]
+    models: ["gemini/gemini-embedding-001", "qwen/text-embedding-v3"]

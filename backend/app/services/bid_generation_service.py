@@ -99,14 +99,13 @@ class BidGenerationService:
         self.session = session
 
     async def _get_llm_client(self) -> tuple[AsyncOpenAI, str]:
-        """获取 LLM 客户端和模型名"""
-        task_config = LLMSelector.get_config("bid_section_generate")
-        model = (task_config.get("models") or [settings.AI_MODEL])[0]
+        """获取 LLM 客户端和模型名（多 Provider 路由）"""
+        cfg = LLMSelector.get_client_config("bid_section_generate")
         client = AsyncOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL or None,
+            api_key=cfg["api_key"],
+            base_url=cfg["base_url"] or None,
         )
-        return client, model
+        return client, cfg["model"]
 
     async def _rag_retrieve(self, query: str, tenant_id: int, top_k: int = 5) -> str:
         """RAG 检索知识库"""

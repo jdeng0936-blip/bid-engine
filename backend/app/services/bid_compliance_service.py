@@ -312,7 +312,7 @@ class BidComplianceService:
             return []
 
         try:
-            model = LLMSelector.get_model("compliance_check")
+            cfg = LLMSelector.get_client_config("compliance_check")
             temperature = LLMSelector.get_temperature("compliance_check")
             max_tokens = LLMSelector.get_max_tokens("compliance_check")
         except (KeyError, ValueError):
@@ -320,7 +320,6 @@ class BidComplianceService:
 
         # 构建批量检查 prompt
         cred_summary = "、".join(c.cred_name for c in credentials) if credentials else "无资质数据"
-        # 截取章节文本前 6000 字（避免超长）
         chapter_excerpt = chapter_text[:6000]
 
         req_list = "\n".join(
@@ -349,11 +348,11 @@ class BidComplianceService:
 
         try:
             client = AsyncOpenAI(
-                api_key=settings.OPENAI_API_KEY,
-                base_url=settings.OPENAI_BASE_URL or None,
+                api_key=cfg["api_key"],
+                base_url=cfg["base_url"] or None,
             )
             response = await client.chat.completions.create(
-                model=model,
+                model=cfg["model"],
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
                 max_tokens=max_tokens,
