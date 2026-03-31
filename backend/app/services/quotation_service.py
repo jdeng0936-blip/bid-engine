@@ -194,3 +194,32 @@ class QuotationService:
         await self.session.commit()
         await self.session.refresh(sheet)
         return sheet
+
+    @staticmethod
+    def check_price_reasonability(sheet: QuotationSheet, budget: float = None) -> list[dict]:
+        """报价合理性检查 — 返回预警列表"""
+        warnings = []
+        if not sheet or not sheet.items:
+            return warnings
+
+        if budget and sheet.total_amount and sheet.total_amount > budget:
+            warnings.append({
+                "level": "fatal",
+                "message": f"报价总额 ¥{sheet.total_amount:,.2f} 超过预算 ¥{budget:,.2f}",
+            })
+
+        for item in sheet.items:
+            if item.market_ref_price and item.unit_price:
+                ratio = item.unit_price / item.market_ref_price
+                if ratio < 0.5:
+                    warnings.append({
+                        "level": "warning",
+                        "message": f"{item.item_name} 单价远低于参考价（{ratio:.0%}），可能低于成本",
+                    })
+                elif ratio > 2.0:
+                    warnings.append({
+                        "level": "warning",
+                        "message": f"{item.item_name} 单价远高于参考价（{ratio:.0%}），竞争力不足",
+                    })
+
+        return warnings

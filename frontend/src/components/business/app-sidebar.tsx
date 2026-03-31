@@ -9,6 +9,7 @@ import {
   Bot,
   Library,
   ClipboardList,
+  CreditCard,
 } from "lucide-react";
 import { useAuthStore } from "@/lib/stores/auth-store";
 
@@ -18,6 +19,7 @@ const NAV_ITEMS = [
   { href: "/dashboard/bid-projects", label: "投标项目", icon: ClipboardList },
   { href: "/dashboard/ai", label: "AI 助手", icon: Bot },
   { href: "/dashboard/knowledge", label: "知识库", icon: Library },
+  { href: "/dashboard/billing", label: "计费中心", icon: CreditCard },
   { href: "/dashboard/system", label: "系统管理", icon: Database },
 ];
 

@@ -79,3 +79,19 @@ async def delete_enterprise(
     if not ok:
         raise HTTPException(status_code=404, detail="企业不存在")
     return ApiResponse(data={"deleted": True})
+
+
+@router.get("/{enterprise_id}/readiness", response_model=ApiResponse)
+async def check_readiness(
+    enterprise_id: int,
+    tenant_id: int = Depends(get_tenant_id),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """检查企业资料完整度（投标准备度评估）"""
+    from app.services.readiness_check_service import ReadinessCheckService
+    svc = ReadinessCheckService(session)
+    try:
+        result = await svc.check(enterprise_id, tenant_id)
+        return ApiResponse(data=result)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))

@@ -98,6 +98,24 @@ class BidGenerationService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    @staticmethod
+    def _get_domain_requirements(chapter_title: str) -> str:
+        """根据章节标题匹配专项 Prompt"""
+        domain_map = {
+            "冷链": "cold_chain", "配送": "delivery", "食材采购": "cold_chain",
+            "质量": "quality_control", "食品安全": "food_safety",
+            "人员": "personnel", "培训": "personnel",
+            "应急": "emergency", "服务方案": "emergency",
+            "报价": "quotation",
+        }
+        for keyword, domain in domain_map.items():
+            if keyword in chapter_title:
+                try:
+                    return prompt_manager.format_prompt("domain_prompts", domain)
+                except Exception:
+                    pass
+        return "无特定专项要求，请按通用投标文件规范撰写。"
+
     async def _get_llm_client(self) -> tuple[AsyncOpenAI, str]:
         """获取 LLM 客户端和模型名（多 Provider 路由）"""
         cfg = LLMSelector.get_client_config("bid_section_generate")
@@ -259,21 +277,47 @@ class BidGenerationService:
             images = list(img_result.scalars().all())
         images_info = _build_images_info(images)
 
-        # 调用 LLM
-        client, model = await self._get_llm_client()
-        task_config = LLMSelector.get_config("bid_section_generate")
+        # 计算章节评分权重 → 选择 Prompt 版本和深度
+        total_score = sum(r.get("max_score", 0) or 0 for r in mapped_reqs)
+        score_weight = round(total_score / max(sum(
+            (r.max_score or 0) for r in project.requirements if r.category == "scoring"
+        ), 1) * 100, 1)
+        priority_level = "高优先级" if total_score >= 15 else "中优先级" if total_score >= 8 else "标准"
 
-        prompt = prompt_manager.format_prompt(
-            "bid_generation", "v2_with_images",
-            chapter_no=chapter.chapter_no,
-            title=chapter.title,
-            project_info=project_info,
-            enterprise_info=enterprise_info,
-            scoring_criteria=scoring_text,
-            outline=outline,
-            rag_context=rag_context,
-            available_images=images_info,
-        )
+        # 构建专项要求（根据章节标题匹配）
+        domain_requirements = self._get_domain_requirements(chapter.title)
+
+        # 调用 LLM — 优先使用 V3 评分驱动 Prompt
+        client, model = await self._get_llm_client()
+
+        try:
+            prompt = prompt_manager.format_prompt(
+                "bid_generation", "v3_scoring_driven",
+                chapter_no=chapter.chapter_no,
+                title=chapter.title,
+                project_info=project_info,
+                enterprise_info=enterprise_info,
+                scoring_criteria=scoring_text,
+                outline=outline,
+                rag_context=rag_context,
+                score_weight=score_weight,
+                max_score=total_score,
+                priority_level=priority_level,
+                domain_requirements=domain_requirements,
+            )
+        except Exception:
+            # V3 不可用时降级到 V2
+            prompt = prompt_manager.format_prompt(
+                "bid_generation", "v2_with_images",
+                chapter_no=chapter.chapter_no,
+                title=chapter.title,
+                project_info=project_info,
+                enterprise_info=enterprise_info,
+                scoring_criteria=scoring_text,
+                outline=outline,
+                rag_context=rag_context,
+                available_images=images_info,
+            )
 
         response = await client.chat.completions.create(
             model=model,
