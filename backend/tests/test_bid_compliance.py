@@ -9,11 +9,15 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from app.services.bid_compliance_service import (
-    BidComplianceService,
-    ComplianceResult,
-    _QUAL_KEYWORD_MAP,
-)
+
+def _load_compliance():
+    """延迟导入，避免 collect 阶段触发 Settings 校验"""
+    from app.services.bid_compliance_service import (
+        BidComplianceService,
+        ComplianceResult,
+        _QUAL_KEYWORD_MAP,
+    )
+    return BidComplianceService, ComplianceResult, _QUAL_KEYWORD_MAP
 
 
 class FakeRequirement:
@@ -39,6 +43,7 @@ class TestKeywordExtraction:
     """关键词提取逻辑"""
 
     def test_extract_chinese_keywords(self):
+        BidComplianceService, _, _ = _load_compliance()
         keywords = BidComplianceService._extract_keywords(
             "投标人应具备食品经营许可证和冷链运输资质"
         )
@@ -48,6 +53,7 @@ class TestKeywordExtraction:
         assert "冷链" in joined or "运输资质" in joined
 
     def test_filter_stop_words(self):
+        BidComplianceService, _, _ = _load_compliance()
         keywords = BidComplianceService._extract_keywords(
             "投标人需要提供相关有效合格证明"
         )
@@ -57,6 +63,7 @@ class TestKeywordExtraction:
         assert "相关" not in keywords
 
     def test_empty_text(self):
+        BidComplianceService, _, _ = _load_compliance()
         keywords = BidComplianceService._extract_keywords("")
         assert keywords == []
 
@@ -65,6 +72,7 @@ class TestDisqualificationCheck:
     """废标项检查逻辑"""
 
     def setup_method(self):
+        BidComplianceService, _, _ = _load_compliance()
         self.svc = BidComplianceService(session=None)
 
     def test_missing_food_license_fails(self):
@@ -176,6 +184,7 @@ class TestQualKeywordMap:
     """资格关键词映射表完整性"""
 
     def test_core_keywords_present(self):
+        _, _, _QUAL_KEYWORD_MAP = _load_compliance()
         assert "营业执照" in _QUAL_KEYWORD_MAP
         assert "食品经营许可" in _QUAL_KEYWORD_MAP
         assert "HACCP" in _QUAL_KEYWORD_MAP
@@ -183,6 +192,7 @@ class TestQualKeywordMap:
         assert "冷链" in _QUAL_KEYWORD_MAP
 
     def test_each_maps_to_list(self):
+        _, _, _QUAL_KEYWORD_MAP = _load_compliance()
         for keyword, types in _QUAL_KEYWORD_MAP.items():
             assert isinstance(types, list), f"{keyword} 的值不是 list"
             assert len(types) > 0, f"{keyword} 的资质类型列表为空"
