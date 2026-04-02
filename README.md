@@ -1,223 +1,62 @@
-# 掘进工作面规程智能生成平台
+# 鲜标智投 FreshBid Pro
 
-> AI 赋能煤矿掘进工作面作业规程编制，从 3\~5 天缩短到 30 分钟
+> AI 驱动的生鲜食材配送投标文档智能生成平台 — 从招标解析到合规标书，全流程自动化
 
 [![Backend CI](https://github.com/jdeng0936-blip/-/actions/workflows/backend-ci.yml/badge.svg)](https://github.com/jdeng0936-blip/-/actions)
 
-## 📊 核心指标
+## 项目概述
 
-| 指标 | 数值 |
+**鲜标智投** 是一套专为生鲜食材配送企业打造的 SaaS 投标辅助平台，能够：
+
+- 📄 **一键解析招标文件** — 上传 PDF/DOCX 后自动提取评分标准、资质要求和商务条款
+- 🤖 **AI 多节点生成引擎** — 基于企业画像和知识库，分章节智能生成合规的投标文档
+- ✅ **三级合规审查** — 格式规则（L1）+ 语义校验（L2）+ 废标项检测（L3）
+- 📊 **报价智能编制** — 结合历史中标数据，支持 6 品类自动报价计算
+- 🔍 **反 AI 痕迹检测** — 降低生成文本的机器识别风险
+
+## 技术架构
+
+| 层 | 技术栈 |
 |---|---|
-| AI 9 章结构覆盖率 | **92.1%**（429 条客户真实规程验证） |
-| 知识库总量 | **673 条**（244 集团标准 + 429 客户样本） |
-| 文档生成时间 | ≤ 35 秒（并发 AI 润色 + 30s 超时降级） |
-| 合规校验维度 | 4 维（断面 / 支护 / 通风 / 安全） |
-| 单元测试 | 79 用例 |
+| 前端 | Next.js 16 + TypeScript + TailwindCSS + shadcn/ui |
+| 后端 | FastAPI + Python 3.11 + SQLAlchemy（异步）|
+| 数据库 | PostgreSQL 16 + pgvector（向量检索）+ Redis |
+| AI 引擎 | LLMSelector 多供应商路由（OpenAI / DeepSeek / Qwen / Gemini）|
+| 部署 | Docker Compose + Nginx |
 
-## ✨ 核心功能
-
-| 模块 | 描述 | 技术 |
-|---|---|---|
-| 🤖 AI 智能对话 | 自然语言提问 → Tool Calling 自动路由 → 专业回答 | Gemini 2.5 Flash + SSE |
-| 📐 支护计算引擎 | 锚杆/锚索间距、排距、数量自动计算 + 合规校验 | 确定性算法 |
-| 🌬️ 通风计算引擎 | 瓦斯/人数/炸药/风速 四法取最大值 + 局扇推荐 | 确定性算法 |
-| 📋 规则匹配引擎 | 围岩级别 × 断面形式 × 瓦斯等级 → 命中规则推荐 | DSL 规则树 |
-| 📄 文档生成引擎 | 参数 → 计算 → 规则 → AI 润色 → 9 章 Word 导出 | python-docx + asyncio |
-| 📚 语义检索 | pgvector 向量检索 673 条标准+知识片段 | RAG |
-| 🔄 数据飞轮 | 用户反馈（采纳/修改/拒绝）→ 差异度量化 → SFT 数据池 | Jaccard 距离 |
-| ✅ 合规审查看板 | 项目级四维合规校核 · 批量审查 · 圆形进度环 | FastAPI + React |
-| 📊 基准对比 | AI 生成 vs 客户真实规程逐章覆盖率分析 | 向量分类 |
-
-## 🏗️ 技术架构
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                 Frontend (Next.js 16)                    │
-│          TypeScript · Tailwind CSS · Framer Motion       │
-├─────────────────────────────────────────────────────────┤
-│                  Backend (FastAPI)                        │
-│   async/await · Pydantic V2 · JWT · SSE/WebSocket        │
-├────────┬────────┬────────┬────────┬─────────┬───────────┤
-│ AI     │ Calc   │ Rule   │ Doc    │ RAG     │ Feedback  │
-│ Router │ Engine │ Engine │ Gen    │ Search  │ Flywheel  │
-├────────┴────────┴────────┴────────┴─────────┴───────────┤
-│        PostgreSQL 16 + pgvector │ Redis Stack            │
-└─────────────────────────────────────────────────────────┘
-```
-
-## 🚀 快速启动
-
-### 前置条件
-
-- Python 3.11+ / Node.js 20.9.0+（推荐使用 [nvm](https://github.com/nvm-sh/nvm) 管理）
-- PostgreSQL 16 + pgvector 扩展
-- Redis Stack
-
-### 1. 克隆 & 安装
+## 快速启动
 
 ```bash
-git clone https://github.com/jdeng0936-blip/-.git
-cd -
-
-# 后端
-cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# 前端
-cd ../frontend
-npm install
-```
-
-### 2. 配置环境变量
-
-```bash
+# 复制环境配置
 cp backend/.env.example backend/.env
+# 填入必要的 API Key 和数据库配置后执行：
+docker compose up -d
 ```
 
-编辑 `backend/.env`，**必须设置**以下变量：
+访问 `http://localhost:3000` 打开平台界面。
 
-| 变量 | 必须 | 说明 |
-|---|---|---|
-| `GEMINI_API_KEY` | ✅ | Gemini API 密钥（AI 对话 / 文档润色） |
-| `SECRET_KEY` | ✅ 生产 | JWT 签名密钥，≥32 字节随机字符串。**非 DEBUG 模式未设置会拒绝启动** |
-| `DATABASE_URL` | ✅ | PostgreSQL 连接串（含 pgvector 扩展） |
-| `ADMIN_INIT_PASSWORD` | 可选 | 管理员初始密码（默认 `admin123`，建议自定义） |
-| `DEBUG` | 可选 | 调试模式（默认 `false`，开发环境设为 `true`） |
-
-```bash
-# 生成安全的 SECRET_KEY
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-### 3. 数据库初始化
-
-```bash
-cd backend
-
-# 创建数据库 + pgvector 扩展
-psql -h localhost -p 5433 -U postgres -c "CREATE DATABASE excavation_platform;"
-psql -h localhost -p 5433 -U postgres -d excavation_platform -c "CREATE EXTENSION IF NOT EXISTS vector;"
-
-# 运行迁移
-source venv/bin/activate
-alembic upgrade head
-```
-
-### 4. 启动服务
-
-```bash
-# 后端（终端 1）
-cd backend && source venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-# 前端（终端 2）
-cd frontend
-nvm use          # 自动读取 .nvmrc 切换到 Node 20
-npm run dev
-```
-
-访问 http://localhost:3000 | API 文档 http://localhost:8000/docs
-
-### Docker 一键部署
-
-```bash
-docker-compose up -d
-```
-
-## 📁 项目结构
+## 目录结构
 
 ```
-backend/
-├── app/
-│   ├── api/v1/          # FastAPI 路由（13 个模块）
-│   ├── core/            # 配置 / 数据库 / 安全
-│   ├── models/          # SQLAlchemy 模型
-│   ├── schemas/         # Pydantic V2 请求/响应模型
-│   └── services/        # 业务逻辑层
-│       ├── ai_router.py        # AI 智能路由引擎（6 个 Tool）
-│       ├── calc_engine.py      # 支护计算引擎
-│       ├── vent_engine.py      # 通风计算引擎
-│       ├── rule_service.py     # 规则匹配引擎
-│       ├── doc_generator.py    # 文档生成引擎（并发 AI 润色）
-│       ├── compliance_engine.py# 合规校验引擎（4 维）
-│       ├── embedding_service.py# 向量检索服务
-│       └── diff_sink.py        # 差异度下沉管道
-├── scripts/
-│   ├── ingest_group_standards.py  # 集团标准入库（244 条）
-│   ├── ingest_customer_samples.py # 客户样本入库（429 条）
-│   └── benchmark_comparison.py    # AI vs 人工基准对比
-├── migrations/          # Alembic 数据库迁移
-├── tests/               # pytest 单元测试（79 用例）
-└── requirements.txt
-
-frontend/
-├── src/app/dashboard/   # 页面路由（11 个页面）
-│   ├── page.tsx         # 工作台（统计 + 飞轮面板）
-│   ├── ai/page.tsx      # AI 智能助手
-│   ├── projects/        # 规程项目管理 + Word 下载
-│   ├── compliance/      # 合规审查看板（批量审查 + 进度环）
-│   ├── knowledge/       # 知识库（语义搜索 + CRUD）
-│   └── ...
-└── package.json
+-/
+├── backend/           # FastAPI 后端
+│   ├── app/
+│   │   ├── api/v1/    # 路由层
+│   │   ├── services/  # 业务逻辑层
+│   │   ├── models/    # 数据库模型
+│   │   └── core/      # 配置、LLM 选择器、安全
+│   ├── alembic/       # 数据库迁移
+│   ├── tests/         # 测试文件
+│   └── llm_registry.yaml  # LLM 任务路由注册表
+├── frontend/          # Next.js 前端
+├── nginx/             # Nginx 反向代理配置
+├── docs/              # 设计文档与规划
+└── docker-compose.yml
 ```
 
-## 🧪 测试
+## 开发规范
 
-```bash
-# ===== 后端 (79 用例) =====
-cd backend && source venv/bin/activate
-python -m pytest tests/ -q          # 全量运行
-python -m pytest tests/ -q -x       # 遇到第一个失败即停止
-
-# ===== 前端 (5 用例) =====
-cd frontend
-npm test
-```
-
-## 📊 API 概览
-
-| 方法 | 路径 | 描述 |
-|---|---|---|
-| POST | `/api/v1/auth/login` | 用户登录（JWT） |
-| GET | `/api/v1/projects` | 项目列表（分页） |
-| POST | `/api/v1/ai/chat` | AI 对话（SSE 流式） |
-| POST | `/api/v1/projects/{id}/generate` | 生成 9 章 Word 文档 |
-| GET | `/api/v1/projects/{id}/documents/download` | 下载 Word 文件 |
-| POST | `/api/v1/calc/compliance/project/{id}` | 项目级合规审查 |
-| GET | `/api/v1/knowledge/search?q=` | 语义搜索知识库 |
-| POST | `/api/v1/feedback` | 提交用户反馈 |
-| GET | `/api/v1/feedback/stats` | 飞轮统计数据 |
-| GET | `/api/v1/standards` | 标准库列表 |
-
-完整文档：http://localhost:8000/docs
-
-## 💾 数据库备份与恢复
-
-```bash
-# 备份（导出到 ./backups/ 目录）
-bash backend/scripts/db_backup.sh
-
-# 恢复（从指定 dump 文件恢复）
-bash backend/scripts/db_restore.sh ./backups/excavation_20260322_213000.dump
-```
-
-> ⚠️ 恢复操作会覆盖当前数据库！恢复后需重启后端服务以重建数据库连接。
-
-## 🔒 安全加固日志
-
-### 2026-03-24 安全审查 & 修复
-
-| 严重度 | 隐患 | 修复文件 | 修复内容 |
-|---|---|---|---|
-| **CRITICAL** | 多租户隔离被击穿 | `standard.py` `standard_service.py` `doc.py` | 4 个端点补全 `tenant_id` 校验 + 路径遍历防御 |
-| **HIGH** | SSE 流式架构断裂 | `[id]/page.tsx` `ai_router.py` | `fetch + ReadableStream` 替代 `EventSource`，消除 Token 泄漏；AI 流加入超时和异常处理 |
-| **HIGH** | Nginx 安全头缺失 + 并发竞态 | `nginx.conf` `doc_generator.py` | 5 个安全响应头（X-Frame-Options 等）；`Semaphore(5)` 限制并发 |
-| **MEDIUM** | RAG 检索 `tenant_id` 硬编码 | `doc_generator.py` | `tenant_id=1` → 透传实际 `tenant_id` |
-| **MEDIUM** | SECRET_KEY 无启动校验 | `config.py` | 非 DEBUG 模式使用默认密钥直接拒绝启动 |
-| **LOW** | 管理员密码硬编码 | `main.py` | 改为 `ADMIN_INIT_PASSWORD` 环境变量读取 |
-
-## 📄 License
-
-私有项目 · 华阳集团内部使用
+- 所有 LLM 调用必须通过 `LLMSelector`，严禁硬编码模型名或 API Key
+- 所有业务数据读写必须携带 `tenant_id` 过滤（多租户隔离）
+- 数据库变更必须通过 `alembic revision --autogenerate` 生成迁移文件
+- 详见 `.antigravity_rules.md` 中的双代理开发协作规范

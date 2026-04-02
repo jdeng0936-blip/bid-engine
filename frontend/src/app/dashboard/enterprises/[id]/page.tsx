@@ -239,6 +239,22 @@ function AiSuggestionPanel({ draft, credentials, images, enterprise, onAcceptTex
       const found = credentials.filter(c => c.cred_type === "award");
       if (found.length > 0) { autoChecked.add(item); autoNotes[item] = `已有 ${found.length} 项荣誉`; }
     }
+    if (lower.includes("保险") || lower.includes("保单") || lower.includes("责任险") || lower.includes("保额")) {
+      const found = credentials.filter(c => c.cred_type === "liability_insurance");
+      if (found.length > 0) { autoChecked.add(item); autoNotes[item] = `已有: ${found[0].cred_name}`; }
+    }
+    if (lower.includes("冷链运输") || lower.includes("运输资质")) {
+      const found = credentials.filter(c => c.cred_type === "cold_chain_transport");
+      if (found.length > 0) { autoChecked.add(item); autoNotes[item] = `已有: ${found[0].cred_name}`; }
+    }
+    if (lower.includes("动物防疫") || lower.includes("检疫")) {
+      const found = credentials.filter(c => c.cred_type === "animal_quarantine");
+      if (found.length > 0) { autoChecked.add(item); autoNotes[item] = `已有: ${found[0].cred_name}`; }
+    }
+    if (lower.includes("有机") || lower.includes("绿色食品")) {
+      const found = credentials.filter(c => ["organic_cert", "green_food"].includes(c.cred_type));
+      if (found.length > 0) { autoChecked.add(item); autoNotes[item] = `已有: ${found.map(f => f.cred_name).join("、")}`; }
+    }
     // 企业数据匹配
     if (lower.includes("冷链车") || lower.includes("配送车辆") || lower.includes("车辆")) {
       if (enterprise.cold_chain_vehicles && enterprise.cold_chain_vehicles > 0) {
@@ -300,7 +316,7 @@ function AiSuggestionPanel({ draft, credentials, images, enterprise, onAcceptTex
       return { id: "section-basic", label: "工商信息" };
     if (lower.includes("冷链") || lower.includes("车辆") || lower.includes("仓储") || lower.includes("冷库") || lower.includes("面积") || lower.includes("配送车"))
       return { id: "section-coldchain", label: "冷链资产" };
-    if (lower.includes("营业执照") || lower.includes("许可证") || lower.includes("认证") || lower.includes("haccp") || lower.includes("iso") || lower.includes("资质") || lower.includes("证书") || lower.includes("业绩") || lower.includes("合同") || lower.includes("健康证") || lower.includes("检测") || lower.includes("荣誉") || lower.includes("获奖"))
+    if (lower.includes("营业执照") || lower.includes("许可证") || lower.includes("认证") || lower.includes("haccp") || lower.includes("iso") || lower.includes("资质") || lower.includes("证书") || lower.includes("业绩") || lower.includes("合同") || lower.includes("健康证") || lower.includes("检测") || lower.includes("荣誉") || lower.includes("获奖") || lower.includes("保险") || lower.includes("保单") || lower.includes("保额") || lower.includes("责任险") || lower.includes("培训") || lower.includes("履历") || lower.includes("人员") || lower.includes("项目负责") || lower.includes("管理员") || lower.includes("中标通知") || lower.includes("履约") || lower.includes("发票") || lower.includes("满意度") || lower.includes("表扬"))
       return { id: "section-credentials", label: "资质证书库" };
     if (lower.includes("照片") || lower.includes("图片") || lower.includes("现场") || lower.includes("截图"))
       return { id: "section-images", label: "图片资源库" };
@@ -494,6 +510,7 @@ export default function EnterpriseDetailPage() {
   const [form, setForm] = useState<Partial<Enterprise>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   // 图片管理
   const [images, setImages] = useState<ImageAsset[]>([]);
@@ -529,8 +546,8 @@ export default function EnterpriseDetailPage() {
     materials_needed?: string[];
   } | null>(null);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (isInitial = true) => {
+    if (isInitial) setLoading(true);
     try {
       const [entRes, credRes, imgRes] = await Promise.all([
         api.get(`/enterprises/${enterpriseId}`),
@@ -543,12 +560,13 @@ export default function EnterpriseDetailPage() {
       setCredentials(credRes.data?.data || []);
       const imgs = imgRes.data?.data || [];
       setImages(imgs);
-      // 默认展开所有有图片的分类
-      setExpandedCats(new Set(imgs.map((i: ImageAsset) => i.category)));
+      if (isInitial) {
+        setExpandedCats(new Set(imgs.map((i: ImageAsset) => i.category)));
+      }
     } catch {
       // ignore
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
   }, [enterpriseId]);
 
@@ -563,9 +581,12 @@ export default function EnterpriseDetailPage() {
   const handleSave = async () => {
     if (!enterprise) return;
     setSaving(true);
+    setSaveSuccess(false);
     try {
       await api.put(`/enterprises/${enterprise.id}`, form);
-      await fetchData();
+      await fetchData(false);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: any) {
       alert(err.response?.data?.detail || "保存失败");
     } finally {
@@ -582,34 +603,72 @@ export default function EnterpriseDetailPage() {
     }
     setAiOptimizing(field);
     try {
+      // 汇总已有资质信息
+      const credSummary = credentials.length > 0
+        ? credentials.map(c => `${CRED_TYPE_LABELS[c.cred_type] || c.cred_type}: ${c.cred_name}${c.cred_no ? `(${c.cred_no})` : ""}${c.expiry_date ? `, 有效期至${c.expiry_date}` : ""}`).join("\n  - ")
+        : "暂无";
+
       const chapterDef = field === "description"
-        ? "投标文件第二章「投标人基本情况」，评分要点包括：企业规模与实力、行业经验年限、资质证书齐全度、服务客户数量与质量、团队专业能力。"
-        : "投标文件技术方案章节「核心竞争优势」，评分要点包括：供应链管理能力、冷链物流保障、食品安全管控体系、应急响应能力、信息化追溯系统、差异化服务亮点。";
+        ? `投标文件第二章「投标人基本情况」，评分要点包括：
+  1. 企业规模与实力（注册资本、员工规模、年营收）
+  2. 行业经验年限（成立时间、深耕食材配送领域年限）
+  3. 资质证书齐全度（食品经营许可证、ISO22000、HACCP、SC等体系认证数量与等级）
+  4. 服务客户数量与质量（近三年同类项目业绩，尤其是政府/学校/医院等高含金量客户）
+  5. 团队专业能力（项目经理、食品安全管理员、检测员等核心岗位配置及资质）`
+        : `投标文件技术方案章节「核心竞争优势」。这是技术评分的核心得分区域，评委重点关注以下维度：
 
-      const prompt = `你是一位资深的投标文件顾问。请从招投标评分得分的角度，分析并优化以下内容。
+  **整体配送方案（通常6-8分）**：货物来源→采购验收→仓储管理→分拣加工→装车配送→客户签收全流程覆盖，物流路径清晰，时效承诺明确（如每日8点前送达、1小时应急响应）
 
-## 章节定义
+  **食品安全控制（通常6-8分）**：HACCP/ISO22000体系落地执行、农残快检能力（检测项目+频次+设备）、留样制度（48h/125g双份留样）、供应商准入与淘汰机制、从业人员健康管理
+
+  **食品质量控制（通常6分）**：各品类验收标准量化（蔬菜腐烂度≤2%、冷冻水产净重≥82%等）、温控记录与冷链不断链证明、包装标识符合《农产品包装和标识管理办法》
+
+  **应急响应处置（通常6分）**：食物中毒事件处理流程、恶劣天气备用方案、供货量临时增减机制、备用供货渠道、就近处理能力
+
+  **食品追溯系统（通常6分）**：覆盖"采购验收→仓库贮存→分拣加工→装车配送→客户收货"全流程、信息化系统截图或说明、追溯码/批次管理
+
+  **实施难点分析（通常6分）**：识别项目实施的关键难点并给出针对性解决方案，体现专业深度
+
+  核心原则：每个评分维度都必须有对应内容响应，不能有空白维度。优势描述要"数据化+案例化"，避免空泛表述。`;
+
+      const prompt = `你是一位在生鲜食材配送领域有15年经验的资深投标顾问，曾帮助企业中标数百个政府采购和学校食堂配送项目。请从评委打分的角度，逐维度分析并优化以下内容。
+
+## 章节定义与评分维度
 ${chapterDef}
 
 ## 当前内容
 ${text}
 
-## 企业已有资质信息
-- 资质证书数量：${credentials.length} 项
+## 企业已有信息
+- 企业名称：${form.name || "未填写"}
+- 成立日期：${form.established_date || "未填写"}
+- 注册资本：${form.registered_capital || "未填写"} 万元
+- 员工人数：${form.employee_count || "未填写"}
+- 年营收：${form.annual_revenue || "未填写"} 万元
+- 服务客户数：${form.service_customers || "未填写"}
 - 冷链车辆：${form.cold_chain_vehicles || 0} 辆
 - 常温车辆：${form.normal_vehicles || 0} 辆
 - 仓储面积：${form.warehouse_area || "未填写"} ㎡
 - 冷库面积：${form.cold_storage_area || "未填写"} ㎡
-- 员工人数：${form.employee_count || "未填写"}
+- 冷库温度：${form.cold_storage_temp || "未填写"}
+- 资质证书：
+  - ${credSummary}
 
 ## 要求
+1. optimized_text 必须逐维度覆盖评分要点，不能遗漏任何评分维度
+2. 每个维度用"数据+案例"支撑，避免"我司具有丰富经验"等空话
+3. 量化表达：用具体数字（如"配备12辆冷藏车"而非"配备多辆"）
+4. 如果企业已有信息中有数据，必须在优化文本中引用
+5. missing_items 要精确到"哪个评分维度缺什么内容会扣分"
+6. suggestions 要具体到"写什么内容、怎么写能拿到该维度满分"
+
 请严格按以下 JSON 格式返回（不要包含 markdown 代码块标记）：
 {
-  "optimized_text": "优化后的完整文本，300-500字，专业精炼",
-  "score_analysis": "基于评分要点的得分分析，指出当前内容大约能覆盖多少评分点",
-  "missing_items": ["当前内容缺失的得分要点1", "缺失要点2"],
-  "suggestions": ["具体改进建议1：如何补强某个评分点", "建议2"],
-  "materials_needed": ["建议补充的证明材料1", "材料2"]
+  "optimized_text": "优化后的完整文本，按评分维度分段组织，500-800字",
+  "score_analysis": "逐维度分析：当前内容在每个评分维度预估能拿多少分/满分多少分，总计预估得分",
+  "missing_items": ["维度X缺失Y内容，预计丢失Z分", "..."],
+  "suggestions": ["针对维度X：补充具体内容描述，可拿满分N分", "..."],
+  "materials_needed": ["具体证明材料名称及用途", "..."]
 }`;
 
       const res = await api.post("/ai/chat", {
@@ -770,14 +829,22 @@ ${text}
             )}
           </div>
         </div>
-        <Button onClick={handleSave} disabled={saving}>
-          {saving ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="mr-2 h-4 w-4" />
+        <div className="flex items-center gap-3">
+          {saveSuccess && (
+            <span className="flex items-center gap-1 text-sm text-green-600 animate-in fade-in">
+              <CheckCircle2 className="h-4 w-4" />
+              保存成功
+            </span>
           )}
-          保存
-        </Button>
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
+            )}
+            保存
+          </Button>
+        </div>
       </div>
 
       {/* 工商信息 */}
