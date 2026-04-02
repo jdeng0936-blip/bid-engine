@@ -44,7 +44,7 @@ backend/.env copy
 "backend/.env copy"
 
 # 根目录散落测试文件（应归入 backend/tests/）
-test_*.py
+/test_*.py
 
 # 数据库备份
 backups/
