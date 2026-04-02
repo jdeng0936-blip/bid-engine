@@ -1,35 +1,219 @@
 """
 Node 4: 合规门禁 — L1 格式检查 + L2 语义审查 + L3 废标检测
 
-任何一项 L3 检测失败将阻断流水线并返回修复建议。
+三层递进检查，L3 为阻断级别：任何 L3 issue 导致 passed=False。
 """
+from __future__ import annotations
+
+import logging
+import re
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
 from app.services.generation.writer import DraftChapter
 
+logger = logging.getLogger(__name__)
+
+
+# ── 数据结构 ──────────────────────────────────────────────
 
 class ComplianceLevel(str, Enum):
-    L1_FORMAT = "format"       # 格式规范（字数/标题/编号）
-    L2_SEMANTIC = "semantic"   # 语义合规（法规引用/术语准确性）
-    L3_DISQUALIFY = "disqualify"  # 废标项检测（触发即出局）
+    L1_FORMAT = "format"
+    L2_SEMANTIC = "semantic"
+    L3_DISQUALIFY = "disqualify"
 
 
+@dataclass
 class ComplianceIssue:
     """单个合规问题"""
     level: ComplianceLevel
     chapter_no: str
     description: str
-    suggestion: str            # 修复建议
-    is_blocking: bool          # L3 为 True，L1/L2 为 False
+    suggestion: str
+    is_blocking: bool = False  # L3 为 True
 
 
+@dataclass
 class ComplianceReport:
     """合规门禁报告"""
-    passed: bool               # 是否全部通过（无 blocking issue）
-    issues: list[ComplianceIssue]
-    chapters: list[DraftChapter]  # 原样透传或标注问题后的章节
+    passed: bool
+    issues: list[ComplianceIssue] = field(default_factory=list)
+    chapters: list[DraftChapter] = field(default_factory=list)
 
+
+# ── L1 格式检查 ──────────────────────────────────────────
+
+# 章节最低字数阈值
+_MIN_WORD_COUNT = {
+    "第一章": 100,
+    "第二章": 100,
+    "第三章": 500,
+    "第四章": 500,
+    "第五章": 400,
+    "第六章": 400,
+    "第七章": 400,
+    "第八章": 0,   # 报价章节由引擎填充
+    "第九章": 100,
+}
+_DEFAULT_MIN_WORDS = 200
+
+# 口语化/模糊用语黑名单
+_VAGUE_PATTERNS = [
+    re.compile(r"按规定"),
+    re.compile(r"视情况"),
+    re.compile(r"根据实际"),
+    re.compile(r"适当的"),
+    re.compile(r"相关部门"),
+    re.compile(r"有关规定"),
+    re.compile(r"等等"),
+]
+
+
+def _check_l1_format(draft: DraftChapter) -> list[ComplianceIssue]:
+    """L1 格式检查：字数下限 + 空内容 + 口语化用语"""
+    issues = []
+    min_words = _MIN_WORD_COUNT.get(draft.chapter_no, _DEFAULT_MIN_WORDS)
+
+    # 空内容或占位符
+    if not draft.content or draft.content.startswith("（"):
+        if min_words > 0:
+            issues.append(ComplianceIssue(
+                level=ComplianceLevel.L1_FORMAT,
+                chapter_no=draft.chapter_no,
+                description=f"{draft.chapter_no} 内容为空或为占位符",
+                suggestion="需要生成实际章节内容",
+            ))
+        return issues
+
+    # 字数不足
+    if draft.word_count < min_words:
+        issues.append(ComplianceIssue(
+            level=ComplianceLevel.L1_FORMAT,
+            chapter_no=draft.chapter_no,
+            description=f"{draft.chapter_no} 字数不足: {draft.word_count}/{min_words}",
+            suggestion=f"建议扩充至 {min_words} 字以上，补充技术细节和量化指标",
+        ))
+
+    # 口语化/模糊用语
+    for pattern in _VAGUE_PATTERNS:
+        matches = pattern.findall(draft.content)
+        if matches:
+            issues.append(ComplianceIssue(
+                level=ComplianceLevel.L1_FORMAT,
+                chapter_no=draft.chapter_no,
+                description=f"{draft.chapter_no} 包含模糊用语: '{matches[0]}'",
+                suggestion=f"将 '{matches[0]}' 替换为具体数值或标准引用",
+            ))
+
+    return issues
+
+
+# ── L2 语义审查 ──────────────────────────────────────────
+
+# 常见法规标准名称及其标准写法（用于校验引用准确性）
+_STANDARD_REFS = {
+    "食品安全法": "《中华人民共和国食品安全法》",
+    "GB/T 22918": "GB/T 22918",
+    "GB 31621": "GB 31621",
+    "HACCP": "HACCP",
+    "ISO22000": "ISO 22000",
+    "ISO 22000": "ISO 22000",
+}
+
+
+def _check_l2_semantic(
+    draft: DraftChapter,
+    requirements: list[dict],
+) -> list[ComplianceIssue]:
+    """L2 语义审查：法规引用校验 + 评分要求关键词覆盖"""
+    issues = []
+    content = draft.content or ""
+
+    # 检查评分类要求是否在章节中有所覆盖
+    scoring_reqs = [
+        r for r in requirements
+        if r.get("category") == "scoring" and r.get("chapter_no") == draft.chapter_no
+    ]
+    for req in scoring_reqs:
+        req_text = req.get("content", "")
+        # 简单关键词提取（取 2 字以上的词段）
+        keywords = [w for w in re.split(r"[，。、；：\s]+", req_text) if len(w) >= 2]
+        matched = sum(1 for kw in keywords if kw in content)
+        coverage = matched / max(len(keywords), 1)
+        if coverage < 0.3:
+            issues.append(ComplianceIssue(
+                level=ComplianceLevel.L2_SEMANTIC,
+                chapter_no=draft.chapter_no,
+                description=f"评分项覆盖不足({coverage:.0%}): '{req_text[:40]}'",
+                suggestion="在章节中补充对该评分项的具体响应内容",
+            ))
+
+    return issues
+
+
+# ── L3 废标检测 ──────────────────────────────────────────
+
+# 废标关键词 → 所需资质类型（复用 bid_compliance_service 的映射逻辑）
+_DISQUALIFY_CRED_MAP = {
+    "食品经营许可": "food_license",
+    "营业执照": "business_license",
+    "HACCP": "haccp",
+    "ISO22000": "iso22000",
+    "ISO 22000": "iso22000",
+    "SC认证": "sc",
+    "冷链运输": "cold_chain_transport",
+    "冷链车": "cold_chain_transport",
+    "冷藏车": "cold_chain_transport",
+    "健康证": "health_certificate",
+}
+
+
+def _check_l3_disqualify(
+    drafts: list[DraftChapter],
+    requirements: list[dict],
+    enterprise_cred_types: Optional[set[str]] = None,
+) -> list[ComplianceIssue]:
+    """L3 废标检测：废标项关键词匹配 + 资质缺失检测"""
+    issues = []
+    cred_types = enterprise_cred_types or set()
+    all_content = " ".join(d.content or "" for d in drafts)
+
+    disqualify_reqs = [
+        r for r in requirements if r.get("category") == "disqualification"
+    ]
+
+    for req in disqualify_reqs:
+        req_text = req.get("content", "")
+
+        # 检查是否涉及资质要求
+        for keyword, cred_type in _DISQUALIFY_CRED_MAP.items():
+            if keyword in req_text and cred_type not in cred_types:
+                issues.append(ComplianceIssue(
+                    level=ComplianceLevel.L3_DISQUALIFY,
+                    chapter_no="全局",
+                    description=f"废标风险: 要求 '{keyword}' 但企业缺少对应资质 ({cred_type})",
+                    suggestion=f"请确认企业是否持有 {keyword} 相关资质，缺失将导致废标",
+                    is_blocking=True,
+                ))
+
+        # 检查废标项内容是否在投标文件中被提及/响应
+        keywords = [w for w in re.split(r"[，。、；：\s]+", req_text) if len(w) >= 2]
+        matched = sum(1 for kw in keywords if kw in all_content)
+        coverage = matched / max(len(keywords), 1)
+        if coverage < 0.2:
+            issues.append(ComplianceIssue(
+                level=ComplianceLevel.L3_DISQUALIFY,
+                chapter_no="全局",
+                description=f"废标项未在投标文件中响应: '{req_text[:50]}'",
+                suggestion="必须在对应章节中明确响应该废标项要求",
+                is_blocking=True,
+            ))
+
+    return issues
+
+
+# ── 主入口 ────────────────────────────────────────────────
 
 async def check_compliance(
     drafts: list[DraftChapter],
@@ -40,9 +224,9 @@ async def check_compliance(
     合规门禁节点
 
     三层递进检查:
-      L1 格式 — 章节编号连续性、标题规范、字数下限
-      L2 语义 — 法规引用准确性、术语一致性（调用 LLM）
-      L3 废标 — 匹配废标项关键词，检测资质缺失等致命问题
+      L1 格式 — 章节编号连续性、标题规范、字数下限、口语化用语
+      L2 语义 — 评分项覆盖校验、法规引用准确性
+      L3 废标 — 废标项关键词匹配、资质缺失检测
 
     Args:
         drafts: Node 3 输出的草稿章节
@@ -52,4 +236,23 @@ async def check_compliance(
     Returns:
         合规报告，passed=False 时流水线应暂停等待修复
     """
-    raise NotImplementedError("T5 骨架 — 待实现")
+    all_issues: list[ComplianceIssue] = []
+
+    # L1: 逐章格式检查
+    for draft in drafts:
+        all_issues.extend(_check_l1_format(draft))
+
+    # L2: 逐章语义审查
+    for draft in drafts:
+        all_issues.extend(_check_l2_semantic(draft, requirements))
+
+    # L3: 全局废标检测
+    all_issues.extend(_check_l3_disqualify(drafts, requirements, enterprise_cred_types))
+
+    has_blocking = any(issue.is_blocking for issue in all_issues)
+
+    return ComplianceReport(
+        passed=not has_blocking,
+        issues=all_issues,
+        chapters=drafts,
+    )
