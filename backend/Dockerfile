@@ -17,5 +17,5 @@ COPY . .
 
 EXPOSE 8000
 
-# 启动命令：生产用 gunicorn + uvicorn worker
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# 启动命令：单 worker（_parse_tasks 内存任务池需要进程内共享）
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

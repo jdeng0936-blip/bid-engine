@@ -116,24 +116,66 @@ export default function ChaptersEditorPage() {
     }
   };
 
+  const [genStatus, setGenStatus] = useState("");
+
   const handleGenerateOne = async () => {
     if (!selectedId) return;
     setGenerating(true);
+    setGenStatus("准备生成...");
+    setEditContent("");
+
     try {
-      const res = await api.post(
-        `/bid-projects/${projectId}/generate-chapter/${selectedId}`
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/bid-projects/${projectId}/generate-chapter/${selectedId}/stream`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+          },
+        }
       );
-      const chapter = res.data?.data;
-      if (chapter) {
-        setEditContent(chapter.content || "");
-        setChapters((prev) =>
-          prev.map((ch) => (ch.id === selectedId ? { ...ch, ...chapter } : ch))
-        );
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) return;
+
+      let fullContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const text = decoder.decode(value);
+        const lines = text.split("\n").filter((l) => l.startsWith("data: "));
+
+        for (const line of lines) {
+          const data = line.slice(6);
+          if (data === "[DONE]") continue;
+          try {
+            const msg = JSON.parse(data);
+            if (msg.type === "status") {
+              setGenStatus(msg.text);
+            } else if (msg.type === "content") {
+              fullContent += msg.text;
+              setEditContent(fullContent);
+            } else if (msg.type === "done") {
+              setGenStatus("");
+            } else if (msg.type === "error") {
+              alert(msg.message || "生成失败");
+            }
+          } catch {
+            // skip parse errors
+          }
+        }
       }
+
+      // 刷新章节列表获取最新状态
+      await fetchChapters();
     } catch (err: any) {
-      alert(err.response?.data?.detail || "生成失败");
+      alert("生成失败");
     } finally {
       setGenerating(false);
+      setGenStatus("");
     }
   };
 
@@ -414,7 +456,7 @@ export default function ChaptersEditorPage() {
                         ) : (
                           <Sparkles className="mr-1 h-3.5 w-3.5" />
                         )}
-                        {selectedChapter.content ? "重新生成" : "AI 生成"}
+                        {generating && genStatus ? genStatus : selectedChapter.content ? "重新生成" : "AI 生成"}
                       </Button>
                       <Button size="sm" onClick={handleSave} disabled={saving}>
                         {saving ? (

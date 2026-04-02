@@ -149,9 +149,10 @@ class TenderParseService:
               budget_amount, deadline, delivery_scope, delivery_period
         """
         from openai import AsyncOpenAI
+        import asyncio
 
-        # 提取文本
-        raw_text = extract_tender_text(file_path, filename)
+        # 提取文本 — 通过线程池执行同步 PDF/DOCX 解析，避免阻塞事件循环
+        raw_text = await asyncio.to_thread(extract_tender_text, file_path, filename)
         if not raw_text or len(raw_text.strip()) < 50:
             raise ValueError("招标文件内容为空或过短，无法解析")
         text = _clean_text(raw_text)
@@ -232,7 +233,8 @@ class TenderParseService:
 
     async def extract_text(self, file_path: str, filename: str) -> str:
         """提取并清洗文本"""
-        raw_text = extract_tender_text(file_path, filename)
+        import asyncio
+        raw_text = await asyncio.to_thread(extract_tender_text, file_path, filename)
         if not raw_text or len(raw_text.strip()) < 50:
             raise ValueError("招标文件内容为空或过短，无法解析")
         return _clean_text(raw_text)

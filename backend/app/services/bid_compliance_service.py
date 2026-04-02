@@ -1,7 +1,8 @@
 """
-投标合规检查服务 — 废标项 + 资格要求 + 评分覆盖率检查
+投标合规检查服务 — L0格式预检 + 废标项 + 资格要求 + 评分覆盖率检查
 
 检查维度:
+  L0. 格式预检（numbering/colloquial/standard_ref/paragraph）— 纯规则，毫秒级
   1. 废标项（disqualification）— 最高优先级：对照企业资质+章节内容判定是否满足
   2. 资格要求（qualification）— 比对企业已有证照，找出缺口
   3. 评分覆盖（scoring）— 检查评分标准是否在章节中被充分响应
@@ -9,11 +10,13 @@
   5. 商务要求（commercial）— 检查商务条款是否被响应
 
 架构:
+  - L0 层：格式规范检查（编号跳号/口语化/规范引用/段落质量），纯正则
   - 第一层：规则型检查（关键词/资质匹配），快速且确定性高
   - 第二层：LLM 语义审查，对 warning 项做精细判定（通过 LLMSelector 路由）
   - 检查结果写入 TenderRequirement.compliance_status / compliance_note
 """
 import json
+import re
 from typing import Optional
 
 from openai import AsyncOpenAI
@@ -65,8 +68,150 @@ class ComplianceResult:
 class BidComplianceService:
     """投标合规检查服务"""
 
+    # ===== L0 格式预检常量（移植自 biaobiao，适配生鲜领域）=====
+
+    # 口语化表达黑名单
+    _COLLOQUIAL_PATTERNS = [
+        r"我们?觉得", r"大概", r"差不多", r"可能吧",
+        r"比较好", r"还行", r"挺好的", r"没什么问题",
+        r"OK", r"ok", r"然后呢", r"其实",
+        r"说实话", r"老实说", r"搞定", r"搞好",
+        r"弄一下", r"做一下", r"看看再说",
+    ]
+
+    # 中文一级编号正则
+    _CN_NUMBERING_L1 = re.compile(r"^[一二三四五六七八九十]+、")
+    _CN_NUMS = "一二三四五六七八九十"
+
+    # 食品安全相关规范编号格式
+    _STANDARD_PATTERN = re.compile(
+        r"(GB/?T?\s*\d{4,5}[-—]\d{4}|"
+        r"DB\d{2}/?\s*\d{3,5}[-—]\d{4}|"        # 地方标准
+        r"SB/?T?\s*\d{4,5}[-—]\d{4}|"            # 商业标准
+        r"NY/?T?\s*\d{3,5}[-—]\d{4})"             # 农业标准
+    )
+
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    # ===== L0 格式预检方法 =====
+
+    @classmethod
+    def format_precheck(cls, chapters: list) -> list[dict]:
+        """L0 格式预检 — 对所有章节做纯规则检查，返回问题列表
+
+        Returns:
+            [{"level": "warning", "category": "format", "title": ..., "detail": ...}, ...]
+        """
+        issues: list[dict] = []
+        for ch in chapters:
+            content = ch.content or ""
+            if not content.strip():
+                continue
+            chapter_label = f"「{ch.chapter_no} {ch.title}」"
+
+            # 1. 编号跳号检测
+            issues.extend(cls._check_numbering(content, chapter_label))
+            # 2. 口语化检测
+            issues.extend(cls._check_colloquial(content, chapter_label))
+            # 3. 规范引用年份校验
+            issues.extend(cls._check_standard_refs(content, chapter_label))
+            # 4. 过短段落检测
+            issues.extend(cls._check_paragraph_quality(content, chapter_label))
+
+        return issues
+
+    @classmethod
+    def _check_numbering(cls, content: str, chapter_label: str) -> list[dict]:
+        """检查中文一级编号连续性（一、二、三...不跳号）"""
+        issues = []
+        lines = content.split("\n")
+        found_numbers = []
+
+        for line_no, line in enumerate(lines, 1):
+            stripped = line.strip()
+            match = cls._CN_NUMBERING_L1.match(stripped)
+            if match:
+                num_char = stripped[0]
+                if num_char in cls._CN_NUMS:
+                    found_numbers.append((line_no, cls._CN_NUMS.index(num_char)))
+
+        for i in range(1, len(found_numbers)):
+            prev_idx = found_numbers[i - 1][1]
+            curr_idx = found_numbers[i][1]
+            if curr_idx != prev_idx + 1:
+                expected = cls._CN_NUMS[prev_idx + 1] if prev_idx + 1 < len(cls._CN_NUMS) else "?"
+                issues.append({
+                    "level": "warning",
+                    "category": "format_numbering",
+                    "title": f"{chapter_label} 编号跳号",
+                    "detail": f"第{found_numbers[i][0]}行「{cls._CN_NUMS[curr_idx]}」前应为「{expected}」，"
+                              f"编号不连续可能导致评审扣分",
+                })
+        return issues
+
+    @classmethod
+    def _check_colloquial(cls, content: str, chapter_label: str) -> list[dict]:
+        """检测口语化表达"""
+        found = []
+        for pattern in cls._COLLOQUIAL_PATTERNS:
+            matches = re.findall(pattern, content)
+            if matches:
+                found.extend(matches)
+
+        if found:
+            examples = "、".join(f"「{w}」" for w in found[:5])
+            return [{
+                "level": "warning",
+                "category": "format_colloquial",
+                "title": f"{chapter_label} 口语化表达",
+                "detail": f"检测到 {len(found)} 处口语化: {examples}，标书应使用正式书面语",
+            }]
+        return []
+
+    @classmethod
+    def _check_standard_refs(cls, content: str, chapter_label: str) -> list[dict]:
+        """校验规范引用年份合理性"""
+        issues = []
+        matches = cls._STANDARD_PATTERN.findall(content)
+        for ref in matches:
+            year_match = re.search(r"(\d{4})$", ref)
+            if year_match:
+                year = int(year_match.group(1))
+                if year < 2000:
+                    issues.append({
+                        "level": "warning",
+                        "category": "format_standard_ref",
+                        "title": f"{chapter_label} 规范可能已作废",
+                        "detail": f"引用「{ref}」年份 {year} 过早，食品安全法规更新频繁，请核实是否为现行版本",
+                    })
+                elif year > 2026:
+                    issues.append({
+                        "level": "warning",
+                        "category": "format_standard_ref",
+                        "title": f"{chapter_label} 规范年份异常",
+                        "detail": f"引用「{ref}」年份 {year} 超过当前年份，请核实",
+                    })
+        return issues
+
+    @classmethod
+    def _check_paragraph_quality(cls, content: str, chapter_label: str) -> list[dict]:
+        """检查过短段落"""
+        paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
+        short_paras = [
+            p for p in paragraphs
+            if 0 < len(p) < 20 and not cls._CN_NUMBERING_L1.match(p)
+        ]
+        if len(short_paras) > 3:
+            return [{
+                "level": "advice",
+                "category": "format_paragraph",
+                "title": f"{chapter_label} 段落过短",
+                "detail": f"发现 {len(short_paras)} 个过短段落（少于20字），建议合并或扩充内容",
+            }]
+        return []
+
+    # ===== 主入口 =====
 
     async def check(self, project_id: int, tenant_id: int) -> dict:
         """
@@ -155,11 +300,15 @@ class BidComplianceService:
         failed = sum(1 for r in results if r.status == "failed")
         warning = sum(1 for r in results if r.status == "warning")
 
+        # L0 格式预检（编号跳号/口语化/规范引用/段落质量）
+        format_issues = self.format_precheck(project.chapters) if project.chapters else []
+
         return {
             "total": len(results),
             "passed": passed,
             "failed": failed,
             "warning": warning,
+            "format_issues": format_issues,
             "results": [
                 {
                     "id": r.req_id,

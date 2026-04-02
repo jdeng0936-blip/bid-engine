@@ -1,54 +1,44 @@
 ---
-description: 重启后端服务（先杀旧进程再启动新实例）
+description: 重启后端服务（Docker Compose 容器重启）
 ---
 
-## 重启后端 uvicorn 服务
+# 重启后端
 
-每次需要启动或重启后端服务时，**必须**按以下步骤执行，避免多个旧进程同时监听 8000 端口导致新代码不生效。
+> ⚠️ 本项目通过 Docker Compose 部署，后端容器名: `fresh-bid-api`
+> 统一入口：`http://localhost:8888`（Nginx 反代）
 
 // turbo-all
 
-### 方式一：Docker 部署（推荐）
+## 场景一：仅重启后端（代码已挂载 or 镜像未变）
 
-1. 重启后端容器：
+1. 重启后端容器
 ```bash
-docker compose restart api
+cd /Users/hycdq2026/Desktop/shangxianshicai/- && docker compose restart api
 ```
 
-2. 查看后端日志确认启动成功：
+2. 等待启动并验证
 ```bash
-docker compose logs -f --tail=20 api
+sleep 4 && curl -s http://localhost:8888/api/v1/health
 ```
 
-3. 如需重建后端镜像（改了依赖/Dockerfile 时）：
+3. 查看日志确认无报错
 ```bash
-docker compose build --no-cache api && docker compose up -d api
+cd /Users/hycdq2026/Desktop/shangxianshicai/- && docker compose logs --tail=20 api
 ```
 
-### 方式二：本地直接运行
+## 场景二：修改了依赖/Dockerfile，需要重建镜像
 
-1. 查找所有监听 8000 端口的进程：
+1. 重建并重启后端
 ```bash
-lsof -ti :8000
+cd /Users/hycdq2026/Desktop/shangxianshicai/- && docker compose build --no-cache api && docker compose up -d api
 ```
 
-2. 杀死所有监听 8000 端口的进程：
+2. 验证
 ```bash
-lsof -ti :8000 | xargs kill -9 2>/dev/null || echo "No old processes"
+sleep 5 && curl -s http://localhost:8888/api/v1/health
 ```
 
-3. 等待 2 秒确保端口释放：
+3. 查看日志
 ```bash
-sleep 2
+cd /Users/hycdq2026/Desktop/shangxianshicai/- && docker compose logs --tail=20 api
 ```
-
-4. 启动新的 uvicorn 实例：
-```bash
-cd ./backend && source venv/bin/activate && python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-5. 验证只有一个进程监听 8000：
-```bash
-lsof -i :8000 | grep LISTEN
-```
-预期结果：只有 1-2 行（主进程 + reload worker），不应超过 2 行。

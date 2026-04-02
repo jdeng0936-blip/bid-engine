@@ -1,8 +1,11 @@
 """
-用户反馈服务 — FeedbackLog CRUD + 差异度计算
+用户反馈服务 — FeedbackLog CRUD + 差异度计算 + 数据飞轮
 
-数据飞轮核心：AI 生成 → 用户修改 → 差异度量化 → 模型微调参考
+数据飞轮核心：AI 生成 → 用户修改 → 差异度量化 → 高质量语料回灌 pgvector
 """
+import asyncio
+import difflib
+import logging
 from typing import Optional
 
 from sqlalchemy import select, func
@@ -10,18 +13,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.feedback import FeedbackLog
 
+logger = logging.getLogger("feedback_service")
+
+# 实质性修改阈值：修改超过 10% 才触发飞轮下沉
+_DIFF_THRESHOLD = 0.10
+# 过短文本不值得作为训练语料
+_MIN_TEXT_LENGTH = 50
+
 
 def _calc_diff_ratio(original: str, modified: str) -> float:
-    """计算编辑差异度（Jaccard距离），返回 0~1"""
+    """计算编辑差异度（SequenceMatcher 序列对齐），返回 0~1
+
+    相比 Jaccard 距离（字符集合），SequenceMatcher 基于最长公共子序列，
+    对长文本的段落增删、语句调序等编辑操作的度量更精确。
+    """
+    if original == modified:
+        return 0.0
     if not original or not modified:
         return 1.0
-    set_a = set(original)
-    set_b = set(modified)
-    intersection = len(set_a & set_b)
-    union = len(set_a | set_b)
-    if union == 0:
-        return 0.0
-    return round(1.0 - intersection / union, 4)
+    similarity = difflib.SequenceMatcher(None, original, modified).ratio()
+    return round(1.0 - similarity, 4)
 
 
 class FeedbackService:
@@ -42,10 +53,33 @@ class FeedbackService:
         modified_text: Optional[str] = None,
         comment: Optional[str] = None,
     ) -> FeedbackLog:
-        """提交反馈"""
+        """提交反馈，当编辑差异超过阈值时触发飞轮数据下沉"""
         diff_ratio = None
+        flywheel_triggered = False
+
         if action == "edit" and modified_text:
             diff_ratio = _calc_diff_ratio(original_text, modified_text)
+
+            # 飞轮触发：实质性修改 + 文本足够长 → 异步下沉到 pgvector
+            if (
+                diff_ratio is not None
+                and diff_ratio > _DIFF_THRESHOLD
+                and len(modified_text) > _MIN_TEXT_LENGTH
+            ):
+                flywheel_triggered = True
+                logger.info(
+                    f"[数据飞轮] diff={diff_ratio:.1%} 超过阈值，"
+                    f"触发异步下沉 | chapter={chapter_title[:20]}"
+                )
+                asyncio.create_task(
+                    self._async_sink_to_knowledge_base(
+                        chapter_title=chapter_title,
+                        golden_text=modified_text,
+                        original_text=original_text,
+                        diff_ratio=diff_ratio,
+                        tenant_id=tenant_id,
+                    )
+                )
 
         log = FeedbackLog(
             project_id=project_id,
@@ -63,6 +97,53 @@ class FeedbackService:
         await self.session.commit()
         await self.session.refresh(log)
         return log
+
+    @staticmethod
+    async def _async_sink_to_knowledge_base(
+        chapter_title: str,
+        golden_text: str,
+        original_text: str,
+        diff_ratio: float,
+        tenant_id: int,
+    ):
+        """将人工修订过的高质量语料异步向量化入 pgvector，供后续 RAG 检索"""
+        try:
+            from app.core.database import async_session_factory
+            from app.services.embedding_service import EmbeddingService
+            from sqlalchemy import text as sql_text
+
+            async with async_session_factory() as session:
+                emb_svc = EmbeddingService(session)
+                embedding = await emb_svc.embed_text(golden_text[:2000])
+                if embedding is None:
+                    logger.warning("[数据飞轮] 向量化失败，跳过下沉")
+                    return
+
+                emb_str = "[" + ",".join(str(v) for v in embedding) + "]"
+                await session.execute(
+                    sql_text("""
+                        INSERT INTO chapter_snippet
+                            (chapter_no, chapter_name, content, embedding, tenant_id)
+                        VALUES
+                            (:chapter_no, :chapter_name, :content,
+                             CAST(:embedding AS vector), :tenant_id)
+                    """),
+                    {
+                        "chapter_no": "flywheel",
+                        "chapter_name": chapter_title,
+                        "content": golden_text,
+                        "embedding": emb_str,
+                        "tenant_id": tenant_id,
+                    },
+                )
+                await session.commit()
+
+            logger.info(
+                f"[数据飞轮] 人工修订片段已下沉 | "
+                f"chapter={chapter_title[:20]} | diff={diff_ratio:.1%}"
+            )
+        except Exception as e:
+            logger.error(f"[数据飞轮] 下沉失败: {e}", exc_info=True)
 
     async def list_feedback(
         self, tenant_id: int, project_id: Optional[int] = None, page: int = 1, page_size: int = 20

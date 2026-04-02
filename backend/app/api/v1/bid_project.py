@@ -1,14 +1,17 @@
 """
 投标项目 API 路由 — BidProject + TenderRequirement + BidChapter CRUD + 招标文件上传解析 + AI 生成 + 导出
 """
+import asyncio
 import json
+import logging
 import os
+import uuid as _uuid
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_async_session
+from app.core.database import get_async_session, async_session_factory
 from app.core.deps import get_current_user_payload, get_tenant_id
 from app.schemas.common import ApiResponse
 from app.schemas.bid_project import (
@@ -25,7 +28,79 @@ from app.services.bid_quotation_service import BidQuotationService
 from app.services.risk_report_service import RiskReportService
 from app.schemas.quotation import QuotationSheetOut
 
+logger = logging.getLogger("freshbid")
+
 router = APIRouter(prefix="/bid-projects", tags=["投标项目"])
+
+# ---------- 异步预览解析任务内存池 ----------
+# 结构: {task_id: {"status": "pending"|"done"|"error", "data": {...}, "error": "..."}}
+_parse_tasks: dict[str, dict] = {}
+
+
+async def _run_full_parse(project_id: int, tenant_id: int, user_id: int = 0):
+    """后台协程：对已关联招标文件的项目执行完整结构化解析（独立 session）"""
+    await asyncio.sleep(0)
+    async with async_session_factory() as session:
+        try:
+            svc = BidProjectService(session)
+            project = await svc.get_project(project_id, tenant_id)
+            if not project or not project.tender_doc_path:
+                logger.warning(f"自动解析跳过: project_id={project_id} 无招标文件")
+                return
+
+            project.status = "parsing"
+            await session.commit()
+
+            parser = TenderParseService(session)
+            text = await parser.extract_text(
+                project.tender_doc_path,
+                project.tender_doc_path.split("/")[-1],
+            )
+            result = await parser.parse_with_llm(project_id, tenant_id, text, user_id)
+
+            req_count = sum(
+                len(result.get(k, []))
+                for k in ["disqualification_items", "qualification_requirements",
+                          "technical_requirements", "scoring_criteria",
+                          "commercial_requirements"]
+            )
+            logger.info(f"自动解析完成: project_id={project_id}, 提取招标要求 {req_count} 条")
+        except Exception as e:
+            # 解析失败不抛异常，仅更新状态和记录日志
+            try:
+                project = await svc.get_project(project_id, tenant_id)
+                if project:
+                    project.status = "failed"
+                    await session.commit()
+            except Exception:
+                pass
+            logger.error(f"自动解析失败: project_id={project_id}: {e}")
+
+
+async def _run_preview_parse(task_id: str, temp_path: str, filename: str):
+    """后台协程：执行招标文件预览解析并将结果写入 _parse_tasks"""
+    # 关键：yield 一次让事件循环先把 POST 响应发出去
+    # 否则 preview_parse 内部的同步 PDF 提取会阻塞事件循环，导致响应卡住
+    await asyncio.sleep(0)
+    try:
+        result = await TenderParseService.preview_parse(temp_path, filename)
+        _parse_tasks[task_id] = {
+            "status": "done",
+            "data": {
+                **result,
+                "temp_file_path": temp_path,
+                "filename": filename,
+            },
+            "error": None,
+        }
+        logger.info(f"预览解析任务完成 task_id={task_id}")
+    except Exception as e:
+        _parse_tasks[task_id] = {
+            "status": "error",
+            "data": None,
+            "error": str(e),
+        }
+        logger.error(f"预览解析任务失败 task_id={task_id}: {e}")
 
 
 # ========== Dashboard 统计 ==========
@@ -132,7 +207,7 @@ async def delete_project(
     return ApiResponse(data={"deleted": True})
 
 
-# ========== 招标文件预览解析（新建项目时使用） ==========
+# ========== 招标文件预览解析（异步任务 + 轮询模式） ==========
 
 @router.post("/preview-tender", response_model=ApiResponse)
 async def preview_tender(
@@ -140,25 +215,50 @@ async def preview_tender(
     payload: dict = Depends(get_current_user_payload),
 ):
     """
-    上传招标文件并快速提取基本项目信息（不创建项目、不入库）。
-    用于新建项目时自动填充表单。
+    上传招标文件并启动异步预览解析任务。
+    立即返回 task_id，前端通过轮询 /preview-tender/{task_id}/status 获取结果。
     """
     try:
-        # 保存到临时目录
+        # 保存到临时目录（毫秒级）
         temp_path, filename = await TenderParseService.save_temp_file(file)
 
-        # 预览解析：仅提取基本信息
-        result = await TenderParseService.preview_parse(temp_path, filename)
+        # 生成任务 ID 并注册
+        task_id = _uuid.uuid4().hex
+        _parse_tasks[task_id] = {"status": "pending", "data": None, "error": None}
+
+        # 后台启动异步解析（不阻塞当前请求）
+        asyncio.create_task(_run_preview_parse(task_id, temp_path, filename))
 
         return ApiResponse(data={
-            **result,
-            "temp_file_path": temp_path,
-            "filename": filename,
+            "task_id": task_id,
+            "status": "pending",
+            "message": "文件已上传，AI 解析已在后台启动",
         })
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"招标文件预览解析失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"文件上传失败: {str(e)}")
+
+
+@router.get("/preview-tender/{task_id}/status", response_model=ApiResponse)
+async def preview_tender_status(
+    task_id: str,
+    payload: dict = Depends(get_current_user_payload),
+):
+    """
+    查询招标文件预览解析任务状态。
+    返回 status: pending（进行中）/ done（完成）/ error（失败）。
+    """
+    task = _parse_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="解析任务不存在或已过期")
+
+    return ApiResponse(data={
+        "task_id": task_id,
+        "status": task["status"],
+        "data": task.get("data"),
+        "error": task.get("error"),
+    })
 
 
 # ========== 关联预览时上传的招标文件 ==========
@@ -178,7 +278,7 @@ async def associate_tender(
     payload: dict = Depends(get_current_user_payload),
     session: AsyncSession = Depends(get_async_session),
 ):
-    """将预览时上传的临时招标文件关联到项目"""
+    """将预览时上传的临时招标文件关联到项目，并自动触发后台结构化解析"""
     import shutil
     from pathlib import Path
 
@@ -200,9 +300,14 @@ async def associate_tender(
     project.tender_doc_path = str(dest_path)
     await session.commit()
 
+    # 后台自动触发结构化解析（不阻塞响应）
+    user_id = int(payload.get("sub", 0))
+    asyncio.create_task(_run_full_parse(project_id, tenant_id, user_id))
+    logger.info(f"关联招标文件并启动自动解析: project_id={project_id}")
+
     return ApiResponse(data={
         "file_path": str(dest_path),
-        "message": "招标文件已关联到项目",
+        "message": "招标文件已关联到项目，AI 解析已在后台启动",
     })
 
 
@@ -216,7 +321,7 @@ async def upload_tender(
     payload: dict = Depends(get_current_user_payload),
     session: AsyncSession = Depends(get_async_session),
 ):
-    """上传招标文件"""
+    """上传招标文件（上传完成后自动触发后台 AI 结构化解析）"""
     user_id = int(payload.get("sub", 0))
 
     # 校验项目存在
@@ -233,10 +338,14 @@ async def upload_tender(
         project.tender_doc_path = file_path
         await session.commit()
 
+        # 后台自动触发结构化解析（不阻塞响应）
+        asyncio.create_task(_run_full_parse(project_id, tenant_id, user_id))
+        logger.info(f"上传招标文件并启动自动解析: project_id={project_id}")
+
         return ApiResponse(data={
             "file_path": file_path,
             "filename": filename,
-            "message": "招标文件上传成功，可调用解析接口进行 AI 解析",
+            "message": "招标文件上传成功，AI 解析已在后台自动启动",
         })
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -484,6 +593,34 @@ async def generate_chapter(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"章节生成失败: {str(e)}")
+
+
+@router.post("/{project_id}/generate-chapter/{chapter_id}/stream")
+async def generate_chapter_stream(
+    project_id: int,
+    chapter_id: int,
+    tenant_id: int = Depends(get_tenant_id),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """AI 流式生成单个投标章节（SSE 打字机效果 + 阶段状态推送）"""
+    from app.services.bid_generation_service import BidGenerationService
+    gen_svc = BidGenerationService(session)
+
+    async def event_stream():
+        try:
+            async for event in gen_svc.generate_single_chapter_stream(
+                project_id, chapter_id, tenant_id
+            ):
+                yield event
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/{project_id}/generate-all")

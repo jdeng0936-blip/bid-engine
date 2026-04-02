@@ -31,6 +31,9 @@ from app.models.feedback import FeedbackLog  # noqa: F401
 # 计费
 from app.models.billing import UserQuota, UsageLog  # noqa: F401
 
+# 投标复盘
+from app.models.bid_review import BidProjectReview, BidCompetitor  # noqa: F401
+
 # 系统
 from app.models.audit_log import AuditLog  # noqa: F401
 from app.models.dict_item import SysDictItem  # noqa: F401

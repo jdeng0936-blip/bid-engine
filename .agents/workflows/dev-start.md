@@ -1,25 +1,35 @@
 ---
-description: 一键启动前后端（自动清理端口占用）
+description: 一键启动前后端（Docker Compose 部署）
 ---
 
 # 启动前后端
 
+> ⚠️ 本项目通过 Docker Compose 全栈部署，**不要**尝试本地 `python -m uvicorn` 或 `npm run dev`。
+> 访问入口：`http://localhost:8888`（Nginx 反代）
+
 // turbo-all
 
-1. 清理并启动后端（端口 8000）
+1. 检查 Docker 容器状态
 ```bash
-kill -9 $(lsof -t -i:8000) 2>/dev/null
-cd ./backend && source venv/bin/activate && nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/backend.log 2>&1 &
-sleep 4
-curl -s http://localhost:8000/api/v1/health
+cd /Users/hycdq2026/Desktop/shangxianshicai/- && docker compose ps
 ```
 
-2. 清理并启动前端（端口 3000）
+2. 如果容器未运行，启动全栈服务
 ```bash
-kill -9 $(lsof -t -i:3000) 2>/dev/null; rm -f ./frontend/.next/dev/lock
-source ~/.nvm/nvm.sh && nvm use && cd ./frontend && npm run dev
+cd /Users/hycdq2026/Desktop/shangxianshicai/- && docker compose up -d
 ```
 
-3. 确认两个服务都正常启动：
-   - 后端 health check: `{"status":"ok"}`
-   - 前端 Ready: `✓ Ready in xxxms`
+3. 等待服务就绪并验证后端 Health Check
+```bash
+sleep 5 && curl -s http://localhost:8888/api/v1/health
+```
+
+4. 验证前端可访问
+```bash
+curl -s -o /dev/null -w "前端 HTTP 状态码: %{http_code}\n" http://localhost:8888/
+```
+
+5. 确认启动成功：
+   - 后端 health: `{"status":"ok","service":"fresh-food-bidding-api"}`
+   - 前端 HTTP 状态码: `200` 或 `307`（正常重定向到登录页）
+   - 统一入口: **http://localhost:8888**

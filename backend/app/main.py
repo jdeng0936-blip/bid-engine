@@ -20,6 +20,10 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("freshbid")
+
+# 关闭 pdfminer 的 DEBUG 日志刷屏（解析 PDF 时会产生海量输出）
+logging.getLogger("pdfminer").setLevel(logging.WARNING)
+
 from app.core.database import engine, async_session_factory
 from app.models.base import Base
 
@@ -36,6 +40,7 @@ from app.models.image_asset import *  # noqa: F401,F403
 from app.models.billing import *  # noqa: F401,F403
 from app.models.feedback import *  # noqa: F401,F403
 from app.models.tender_notice import *  # noqa: F401,F403
+from app.models.bid_review import *  # noqa: F401,F403
 
 # ---- API 路由 ----
 from app.api.v1.health import router as health_router
@@ -54,6 +59,7 @@ from app.api.v1.standard import router as standard_router
 from app.api.v1.billing import router as billing_router
 from app.api.v1.feedback import router as feedback_router
 from app.api.v1.tender_notice import router as tender_notice_router
+from app.api.v1.bid_review import router as bid_review_router
 
 
 async def _init_db():
@@ -176,3 +182,4 @@ app.include_router(standard_router, prefix="/api/v1")
 app.include_router(billing_router, prefix="/api/v1")
 app.include_router(feedback_router, prefix="/api/v1")
 app.include_router(tender_notice_router, prefix="/api/v1")
+app.include_router(bid_review_router, prefix="/api/v1")

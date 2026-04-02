@@ -1,21 +1,41 @@
 ---
-description: 重启前端服务（自动清理端口占用和 lock 文件）
+description: 重启前端服务（Docker Compose 容器重启）
 ---
 
 # 重启前端
 
+> ⚠️ 本项目通过 Docker Compose 部署，前端容器名: `fresh-bid-web`
+> 统一入口：`http://localhost:8888`（Nginx 反代）
+
 // turbo-all
 
-1. 杀掉占用 3000 端口的旧进程并清理 lock 文件
+## 场景一：仅重启前端容器
+
+1. 重启前端容器
 ```bash
-kill -9 $(lsof -t -i:3000) 2>/dev/null; rm -f ./frontend/.next/dev/lock; echo "port 3000 cleared, lock removed"
+cd /Users/hycdq2026/Desktop/shangxianshicai/- && docker compose restart web
 ```
 
-2. 切换 Node 版本并启动前端 dev server
+2. 等待启动并验证
 ```bash
-source ~/.nvm/nvm.sh && nvm use && cd ./frontend && npm run dev
+sleep 5 && curl -s -o /dev/null -w "前端 HTTP 状态码: %{http_code}\n" http://localhost:8888/
 ```
 
-3. 确认输出包含 `✓ Ready` 即表示启动成功
+## 场景二：修改了前端代码/依赖，需要重建镜像
 
-**注意**: 如果 3000 被其他项目占用（非本项目进程），Next.js 会自动切换到可用端口（如 3001/3002），此时查看终端输出的实际端口号即可。
+1. 重建并重启前端
+```bash
+cd /Users/hycdq2026/Desktop/shangxianshicai/- && docker compose build --no-cache web && docker compose up -d web
+```
+
+2. 验证
+```bash
+sleep 5 && curl -s -o /dev/null -w "前端 HTTP 状态码: %{http_code}\n" http://localhost:8888/
+```
+
+3. 查看日志
+```bash
+cd /Users/hycdq2026/Desktop/shangxianshicai/- && docker compose logs --tail=20 web
+```
+
+**注意**: 前端是构建后部署（非 dev server），修改代码后必须重建镜像才能生效。

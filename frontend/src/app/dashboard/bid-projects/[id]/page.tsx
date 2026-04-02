@@ -20,11 +20,13 @@ import {
   Upload,
   ClipboardList,
   Download,
+  BookOpen,
 } from "lucide-react";
 import Link from "next/link";
 import api from "@/lib/api";
 import RiskReportPanel from "@/components/business/risk-report-panel";
 import FileDropZone from "@/components/ui/file-drop-zone";
+import ReviewPanel from "./_components/review-panel";
 
 interface TenderRequirement {
   id: number;
@@ -118,6 +120,15 @@ export default function BidProjectDetailPage() {
     fetchProject();
   }, [fetchProject]);
 
+  // 进入页面时如果项目正在解析中，自动启动轮询
+  useEffect(() => {
+    if (project && project.status === "parsing") {
+      setParsing(true);
+      startParsingPoll();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.status === "parsing" && !parsing]);
+
   const handleUpload = async (file: File) => {
     setTenderFile(file);
     setUploading(true);
@@ -137,7 +148,10 @@ export default function BidProjectDetailPage() {
         },
       });
       setUploadProgress(100);
+      // 上传后后端自动触发解析，轮询刷新直到解析完成
+      setParsing(true);
       await fetchProject();
+      startParsingPoll();
     } catch (err: any) {
       setUploadError(err.response?.data?.detail || "上传失败");
     } finally {
@@ -149,13 +163,36 @@ export default function BidProjectDetailPage() {
     setParsing(true);
     try {
       await api.post(`/bid-projects/${projectId}/parse-tender`);
-      await fetchProject();
+      startParsingPoll();
     } catch (err: any) {
       alert(err.response?.data?.detail || "解析失败");
       await fetchProject();
-    } finally {
       setParsing(false);
     }
+  };
+
+  // 轮询等待后台解析完成
+  const startParsingPoll = () => {
+    let count = 0;
+    const interval = setInterval(async () => {
+      count++;
+      try {
+        const res = await api.get(`/bid-projects/${projectId}`);
+        const p = res.data?.data;
+        if (p && p.status !== "parsing") {
+          clearInterval(interval);
+          setProject(p);
+          setParsing(false);
+        } else if (count >= 60) {
+          clearInterval(interval);
+          setParsing(false);
+          setProject(p);
+        }
+      } catch {
+        clearInterval(interval);
+        setParsing(false);
+      }
+    }, 5000);
   };
 
   const handleComplianceCheck = async () => {
@@ -292,9 +329,18 @@ export default function BidProjectDetailPage() {
               </Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="compliance" className="gap-1.5">
+          <TabsTrigger
+            value="compliance"
+            className="gap-1.5"
+            disabled={project.chapters.length === 0}
+            title={project.chapters.length === 0 ? "请先完成投标章节编写后再进行合规检查" : undefined}
+          >
             <ShieldCheck className="h-3.5 w-3.5" />
             合规风控
+          </TabsTrigger>
+          <TabsTrigger value="review" className="gap-1.5">
+            <BookOpen className="h-3.5 w-3.5" />
+            结果与复盘
           </TabsTrigger>
         </TabsList>
 
@@ -302,34 +348,15 @@ export default function BidProjectDetailPage() {
         <TabsContent value="overview" className="space-y-4 mt-4">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Upload className="h-5 w-5" />
-                招标文件上传与解析
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <FileDropZone
-                accept={[".pdf", ".docx", ".doc"]}
-                file={tenderFile}
-                onFileSelect={handleUpload}
-                onFileRemove={() => {
-                  setTenderFile(null);
-                  setUploadError("");
-                  setUploadProgress(0);
-                }}
-                uploading={uploading}
-                progress={uploadProgress}
-                error={uploadError}
-                disabled={uploading}
-                hint="支持 .pdf / .docx / .doc 格式的招标文件"
-              />
-              {project.tender_doc_path && (
-                <div className="flex items-center gap-4">
-                  <span className="text-sm text-green-600">
-                    <CheckCircle2 className="mr-1 inline h-4 w-4" />
-                    已上传招标文件
-                  </span>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  招标文件
+                </CardTitle>
+                {project.tender_doc_path && project.requirements.length > 0 && (
                   <Button
+                    variant="outline"
+                    size="sm"
                     onClick={handleParse}
                     disabled={parsing || project.status === "parsing"}
                   >
@@ -338,8 +365,95 @@ export default function BidProjectDetailPage() {
                     ) : (
                       <Sparkles className="mr-2 h-4 w-4" />
                     )}
-                    AI 解析招标要求
+                    重新解析
                   </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* 已有招标文件：显示文件信息 + 解析状态 */}
+              {project.tender_doc_path ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 p-3">
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-green-500" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-green-800">
+                        {project.tender_doc_path.split("/").pop()}
+                      </p>
+                      <p className="text-xs text-green-600">招标文件已上传</p>
+                    </div>
+                  </div>
+
+                  {/* 解析状态提示 */}
+                  {(parsing || project.status === "parsing") && (
+                    <div className="flex items-center gap-3 rounded-lg bg-blue-50 p-3">
+                      <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+                      <span className="text-sm text-blue-700">
+                        AI 正在解析招标文件，提取结构化要求（废标项 / 资格要求 / 评分标准）...
+                      </span>
+                    </div>
+                  )}
+
+                  {project.requirements.length > 0 && !parsing && project.status !== "parsing" && (
+                    <div className="flex items-center gap-3 rounded-lg bg-green-50 p-3">
+                      <Sparkles className="h-5 w-5 text-green-500" />
+                      <span className="text-sm text-green-700">
+                        已解析出 <strong>{project.requirements.length}</strong> 条招标要求，
+                        请切换到"招标要求"Tab 查看详情
+                      </span>
+                    </div>
+                  )}
+
+                  {/* 替换文件上传（折叠式） */}
+                  <details className="group">
+                    <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-600">
+                      替换招标文件...
+                    </summary>
+                    <div className="mt-2">
+                      <FileDropZone
+                        accept={[".pdf", ".docx", ".doc"]}
+                        file={tenderFile}
+                        onFileSelect={handleUpload}
+                        onFileRemove={() => {
+                          setTenderFile(null);
+                          setUploadError("");
+                          setUploadProgress(0);
+                        }}
+                        uploading={uploading}
+                        progress={uploadProgress}
+                        error={uploadError}
+                        disabled={uploading || parsing}
+                        hint="上传新文件将替换现有招标文件并重新解析"
+                      />
+                    </div>
+                  </details>
+                </div>
+              ) : (
+                /* 无招标文件：显示上传区域 */
+                <div className="space-y-3">
+                  <FileDropZone
+                    accept={[".pdf", ".docx", ".doc"]}
+                    file={tenderFile}
+                    onFileSelect={handleUpload}
+                    onFileRemove={() => {
+                      setTenderFile(null);
+                      setUploadError("");
+                      setUploadProgress(0);
+                    }}
+                    uploading={uploading}
+                    progress={uploadProgress}
+                    error={uploadError}
+                    disabled={uploading}
+                    hint="上传招标文件（PDF/DOCX/DOC），AI 将自动解析提取招标要求"
+                  />
+                  {parsing && (
+                    <div className="flex items-center gap-3 rounded-lg bg-blue-50 p-3">
+                      <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+                      <span className="text-sm text-blue-700">
+                        AI 正在解析招标文件...
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -477,7 +591,7 @@ export default function BidProjectDetailPage() {
         {/* ===== Tab 3: 合规风控 ===== */}
         <TabsContent value="compliance" className="space-y-4 mt-4">
           {/* 合规检查 */}
-          {project.requirements.length > 0 && (
+          {project.requirements.length > 0 && project.chapters.length > 0 && (
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -569,19 +683,38 @@ export default function BidProjectDetailPage() {
             </Card>
           )}
 
-          {project.requirements.length === 0 && (
+          {(project.requirements.length === 0 || project.chapters.length === 0) && (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-16">
                 <ShieldCheck className="h-10 w-10 text-slate-300" />
                 <p className="mt-3 text-sm text-slate-400">
-                  请先上传并解析招标文件后再进行合规检查
+                  {project.requirements.length === 0
+                    ? "请先上传并解析招标文件后再进行合规检查"
+                    : "请先完成投标章节编写，生成投标内容后再进行合规检查"}
                 </p>
+                {project.requirements.length > 0 && project.chapters.length === 0 && (
+                  <Link href={`/dashboard/bid-projects/${project.id}/chapters`}>
+                    <Button variant="outline" className="mt-4">
+                      <ClipboardList className="mr-2 h-4 w-4" />
+                      前往编写投标章节
+                    </Button>
+                  </Link>
+                )}
               </CardContent>
             </Card>
           )}
 
           {/* 风险报告 */}
           <RiskReportPanel projectId={projectId} />
+        </TabsContent>
+
+        {/* ===== Tab 4: 结果与复盘 ===== */}
+        <TabsContent value="review" className="space-y-4 mt-4">
+          <ReviewPanel
+            projectId={projectId}
+            projectName={project.project_name}
+            budgetAmount={project.budget_amount}
+          />
         </TabsContent>
       </Tabs>
     </div>

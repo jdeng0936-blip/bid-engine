@@ -19,6 +19,22 @@ import Link from "next/link";
 import api from "@/lib/api";
 import FileDropZone from "@/components/ui/file-drop-zone";
 
+const CUSTOMER_TYPE_LABELS: Record<string, string> = {
+  school: "学校食堂",
+  hospital: "医院",
+  government: "政府机关",
+  enterprise: "企业食堂",
+  canteen: "团餐公司",
+};
+
+const TENDER_TYPE_LABELS: Record<string, string> = {
+  open: "公开招标",
+  invite: "邀请招标",
+  negotiate: "竞争性谈判",
+  inquiry: "询价",
+  single: "单一来源",
+};
+
 export default function NewBidProjectPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -54,11 +70,10 @@ export default function NewBidProjectPage() {
       const formData = new FormData();
       formData.append("file", file);
 
-      // 上传并预览解析
-      setUploading(true);
-      const res = await api.post("/bid-projects/preview-tender", formData, {
+      // 第一步：上传文件并启动后台解析任务（秒级返回）
+      const uploadRes = await api.post("/bid-projects/preview-tender", formData, {
         headers: { "Content-Type": "multipart/form-data" },
-        timeout: 120000,
+        timeout: 30000, // 仅文件上传，30s 足够
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -71,28 +86,60 @@ export default function NewBidProjectPage() {
       setUploading(false);
       setParsing(true);
 
-      const data = res.data?.data;
-      if (data) {
-        // 保存临时文件路径
-        if (data.temp_file_path) setTempFilePath(data.temp_file_path);
-
-        // 自动填充表单（仅填充非空字段）
-        setForm((prev) => ({
-          ...prev,
-          ...(data.project_name && { project_name: data.project_name }),
-          ...(data.buyer_name && { tender_org: data.buyer_name }),
-          ...(data.customer_type && { customer_type: data.customer_type }),
-          ...(data.tender_type && { tender_type: data.tender_type }),
-          ...(data.deadline && { deadline: data.deadline }),
-          ...(data.budget_amount && { budget_amount: String(data.budget_amount) }),
-          ...(data.delivery_scope && { delivery_scope: data.delivery_scope }),
-          ...(data.delivery_period && { delivery_period: data.delivery_period }),
-        }));
-        setParsed(true);
+      const taskId = uploadRes.data?.data?.task_id;
+      if (!taskId) {
+        setUploadError("服务器未返回解析任务 ID");
+        setParsing(false);
+        return;
       }
+
+      // 第二步：轮询解析状态（每 3 秒查一次，最多 100 次 = 5 分钟）
+      let pollCount = 0;
+      const maxPolls = 100;
+
+      const pollInterval = setInterval(async () => {
+        pollCount++;
+        try {
+          const statusRes = await api.get(`/bid-projects/preview-tender/${taskId}/status`);
+          const taskData = statusRes.data?.data;
+
+          if (taskData?.status === "done" && taskData?.data) {
+            clearInterval(pollInterval);
+            const data = taskData.data;
+            // 保存临时文件路径
+            if (data.temp_file_path) setTempFilePath(data.temp_file_path);
+            // 自动填充表单
+            setForm((prev) => ({
+              ...prev,
+              ...(data.project_name && { project_name: data.project_name }),
+              ...(data.buyer_name && { tender_org: data.buyer_name }),
+              ...(data.customer_type && { customer_type: data.customer_type }),
+              ...(data.tender_type && { tender_type: data.tender_type }),
+              ...(data.deadline && { deadline: data.deadline }),
+              ...(data.budget_amount && { budget_amount: String(data.budget_amount) }),
+              ...(data.delivery_scope && { delivery_scope: data.delivery_scope }),
+              ...(data.delivery_period && { delivery_period: data.delivery_period }),
+            }));
+            setParsed(true);
+            setParsing(false);
+          } else if (taskData?.status === "error") {
+            clearInterval(pollInterval);
+            setUploadError(taskData?.error || "AI 解析失败，请重试");
+            setParsing(false);
+          } else if (pollCount >= maxPolls) {
+            clearInterval(pollInterval);
+            setUploadError("解析超时（超过 5 分钟），请重试或手动填写");
+            setParsing(false);
+          }
+          // status === "pending" → 继续轮询
+        } catch {
+          clearInterval(pollInterval);
+          setUploadError("查询解析状态失败，请重试");
+          setParsing(false);
+        }
+      }, 3000);
     } catch (err: any) {
-      setUploadError(err.response?.data?.detail || "文件上传或解析失败");
-    } finally {
+      setUploadError(err.response?.data?.detail || "文件上传失败");
       setUploading(false);
       setParsing(false);
     }
@@ -227,7 +274,9 @@ export default function NewBidProjectPage() {
                   onValueChange={(v: string | null) => setForm({ ...form, customer_type: v || "" })}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="选择客户类型" />
+                    <SelectValue placeholder="选择客户类型">
+                      {form.customer_type ? CUSTOMER_TYPE_LABELS[form.customer_type] || form.customer_type : undefined}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="school">学校食堂</SelectItem>
@@ -245,7 +294,9 @@ export default function NewBidProjectPage() {
                   onValueChange={(v: string | null) => setForm({ ...form, tender_type: v || "" })}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="选择招标方式" />
+                    <SelectValue placeholder="选择招标方式">
+                      {form.tender_type ? TENDER_TYPE_LABELS[form.tender_type] || form.tender_type : undefined}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="open">公开招标</SelectItem>

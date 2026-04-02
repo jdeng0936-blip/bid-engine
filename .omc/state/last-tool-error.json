@@ -1,0 +1,7 @@
+{
+  "tool_name": "Read",
+  "tool_input_preview": "{\"file_path\":\"/Users/hycdq2026/Desktop/shangxianshicai/-/backend/app/api/v1/bid_project.py\"}",
+  "error": "File content (10357 tokens) exceeds maximum allowed tokens (10000). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.",
+  "timestamp": "2026-04-02T03:39:57.227Z",
+  "retry_count": 1
+}

@@ -179,6 +179,9 @@ class BidChapter(AuditMixin, Base):
     ai_model_used: Mapped[str] = mapped_column(String(50), nullable=True, comment="使用的AI模型")
     ai_prompt_version: Mapped[str] = mapped_column(String(20), nullable=True, comment="使用的Prompt版本")
     has_warning: Mapped[bool] = mapped_column(Boolean, default=False, comment="是否有合规警告")
+    edit_ratio: Mapped[float] = mapped_column(
+        Float, nullable=True, comment="用户编辑占比(0~1)，由反馈飞轮写入"
+    )
 
     # --- 关联 ---
     project = relationship("BidProject", back_populates="chapters")

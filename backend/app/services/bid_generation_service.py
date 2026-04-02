@@ -346,14 +346,21 @@ class BidGenerationService:
                 available_images=images_info,
             )
 
+        # 脱敏：发往云端 LLM 前 mask，返回后 unmask
+        from app.services.desensitize_service import DesensitizeGateway
+        gateway = DesensitizeGateway(tenant_id=tenant_id)
+        masked_prompt, desens_mapping = gateway.mask(prompt)
+
         response = await client.chat.completions.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": masked_prompt}],
             temperature=task_config.get("temperature", 0.3),
             max_tokens=task_config.get("max_tokens", 8192),
         )
 
-        content = response.choices[0].message.content or ""
+        content = gateway.unmask(
+            response.choices[0].message.content or "", desens_mapping
+        )
 
         # ===== Critic 质量闭环（架构红线：AI 生成必须过 Critic） =====
         from app.services.bid_critic_service import BidCriticService
@@ -381,6 +388,190 @@ class BidGenerationService:
         await self.session.refresh(chapter)
 
         return chapter
+
+    async def generate_single_chapter_stream(
+        self, project_id: int, chapter_id: int, tenant_id: int
+    ) -> AsyncGenerator[str, None]:
+        """流式生成单个章节 — SSE 事件流，各阶段推送状态 + 最终打字机效果
+
+        事件格式 (SSE data 行):
+            {"type": "status", "text": "阶段描述..."}
+            {"type": "content", "text": "6字符分片"}
+            {"type": "done", "chapter_id": 123}
+            {"type": "error", "message": "..."}
+        """
+        import json as _json
+
+        def _evt(data: dict) -> str:
+            return f"data: {_json.dumps(data, ensure_ascii=False)}\n\n"
+
+        try:
+            yield _evt({"type": "status", "text": "加载项目与企业信息..."})
+
+            svc = BidProjectService(self.session)
+            project = await svc.get_project(project_id, tenant_id)
+            if not project:
+                yield _evt({"type": "error", "message": "投标项目不存在"})
+                return
+
+            chapter = None
+            for ch in project.chapters:
+                if ch.id == chapter_id:
+                    chapter = ch
+                    break
+            if not chapter:
+                yield _evt({"type": "error", "message": "投标章节不存在"})
+                return
+
+            if chapter.source not in ("ai", "draft", "template"):
+                yield _evt({"type": "done", "chapter_id": chapter_id, "text": "非AI章节，跳过"})
+                return
+
+            # 加载企业信息 + 资质
+            enterprise = None
+            enterprise_info = "企业信息未填写"
+            if project.enterprise_id:
+                from app.models.credential import Credential
+                result = await self.session.execute(
+                    select(Enterprise).where(Enterprise.id == project.enterprise_id)
+                )
+                enterprise = result.scalar_one_or_none()
+                if enterprise:
+                    cred_result = await self.session.execute(
+                        select(Credential).where(
+                            Credential.enterprise_id == enterprise.id,
+                            Credential.tenant_id == tenant_id,
+                        )
+                    )
+                    creds = list(cred_result.scalars().all())
+                    enterprise_info = _build_enterprise_info(enterprise, creds)
+
+            yield _evt({"type": "status", "text": "RAG 知识检索中..."})
+
+            # 映射评分标准
+            requirements = [
+                {"content": r.content, "category": r.category,
+                 "max_score": r.max_score, "score_weight": r.score_weight}
+                for r in project.requirements
+            ]
+            req_mapping = map_requirements_to_chapters(requirements, project.customer_type)
+            mapped_reqs = req_mapping.get(chapter.chapter_no, [])
+
+            outline = build_chapter_outline(
+                chapter.chapter_no, chapter.title, mapped_reqs, project.customer_type
+            )
+            scoring_text = "\n".join(
+                f"- {r.get('content', '')}" + (f"（{r.get('max_score')}分）" if r.get('max_score') else "")
+                for r in mapped_reqs
+            ) or "无特定评分标准映射到本章节"
+
+            project_info = (
+                f"采购方：{project.tender_org or '未知'}（{project.customer_type or '未知'}）\n"
+                f"项目名称：{project.project_name}\n"
+                f"预算金额：{project.budget_amount or '未知'}元\n"
+                f"配送范围：{project.delivery_scope or '未填写'}\n"
+                f"配送周期：{project.delivery_period or '未填写'}"
+            )
+
+            rag_query = f"{chapter.title} 生鲜食材配送 {project.customer_type or ''}"
+            rag_context = await self._rag_retrieve(rag_query, tenant_id)
+
+            # 图片
+            images = []
+            if project.enterprise_id:
+                img_result = await self.session.execute(
+                    select(ImageAsset).where(
+                        ImageAsset.enterprise_id == project.enterprise_id,
+                        ImageAsset.tenant_id == tenant_id,
+                    ).order_by(ImageAsset.sort_order)
+                )
+                images = list(img_result.scalars().all())
+            images_info = _build_images_info(images)
+
+            total_score = sum(r.get("max_score", 0) or 0 for r in mapped_reqs)
+            score_weight = round(total_score / max(sum(
+                (r.max_score or 0) for r in project.requirements if r.category == "scoring"
+            ), 1) * 100, 1)
+            priority_level = "高优先级" if total_score >= 15 else "中优先级" if total_score >= 8 else "标准"
+            domain_requirements = self._get_domain_requirements(chapter.title)
+
+            yield _evt({"type": "status", "text": "AI 生成章节初稿..."})
+
+            client, model = await self._get_llm_client()
+            try:
+                prompt = prompt_manager.format_prompt(
+                    "bid_generation", "v3_scoring_driven",
+                    chapter_no=chapter.chapter_no, title=chapter.title,
+                    project_info=project_info, enterprise_info=enterprise_info,
+                    scoring_criteria=scoring_text, outline=outline,
+                    rag_context=rag_context, score_weight=score_weight,
+                    max_score=total_score, priority_level=priority_level,
+                    domain_requirements=domain_requirements,
+                )
+            except Exception:
+                prompt = prompt_manager.format_prompt(
+                    "bid_generation", "v2_with_images",
+                    chapter_no=chapter.chapter_no, title=chapter.title,
+                    project_info=project_info, enterprise_info=enterprise_info,
+                    scoring_criteria=scoring_text, outline=outline,
+                    rag_context=rag_context, available_images=images_info,
+                )
+
+            yield _evt({"type": "status", "text": "脱敏处理 → 发送至 LLM..."})
+
+            from app.services.desensitize_service import DesensitizeGateway
+            gateway = DesensitizeGateway(tenant_id=tenant_id)
+            masked_prompt, desens_mapping = gateway.mask(prompt)
+
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": masked_prompt}],
+                temperature=0.3, max_tokens=8192,
+            )
+            content = gateway.unmask(
+                response.choices[0].message.content or "", desens_mapping
+            )
+
+            yield _evt({"type": "status", "text": "Critic 质量审查..."})
+
+            from app.services.bid_critic_service import BidCriticService
+            critic = BidCriticService()
+            chapter_meta = {
+                "name": chapter.title,
+                "chapter_no": chapter.chapter_no,
+                "requirements": [r.content for r in project.requirements] if project.requirements else [],
+            }
+            content, critic_meta = await critic.critic_and_rewrite(
+                content, chapter_meta, enterprise
+            )
+
+            rewritten = critic_meta.get("rewritten", False)
+            if rewritten:
+                yield _evt({"type": "status", "text": "Critic 发现问题，已自动重写修复"})
+            else:
+                yield _evt({"type": "status", "text": "Critic 审查通过"})
+
+            # 保存到数据库
+            chapter.content = content
+            chapter.source = "ai"
+            chapter.status = "generated"
+            chapter.ai_model_used = model
+            chapter.ai_prompt_version = "v3_scoring_driven"
+            if hasattr(chapter, "meta") and isinstance(chapter.meta, dict):
+                chapter.meta["critic"] = critic_meta
+            await self.session.commit()
+            await self.session.refresh(chapter)
+
+            # 打字机效果流式推送内容
+            for i in range(0, len(content), 6):
+                chunk = content[i:i + 6]
+                yield _evt({"type": "content", "text": chunk})
+                await asyncio.sleep(0.01)
+
+            yield _evt({"type": "done", "chapter_id": chapter_id})
+
+        except Exception as e:
+            yield _evt({"type": "error", "message": f"生成失败: {str(e)}"})
 
     async def generate_all_chapters(
         self, project_id: int, tenant_id: int, user_id: int
