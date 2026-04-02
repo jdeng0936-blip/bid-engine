@@ -137,8 +137,8 @@ def _check_l2_semantic(
     ]
     for req in scoring_reqs:
         req_text = req.get("content", "")
-        # 简单关键词提取（取 2 字以上的词段）
-        keywords = [w for w in re.split(r"[，。、；：\s]+", req_text) if len(w) >= 2]
+        # 简单关键词提取（取 2 字以上的词段，按标点和常见连接词切分）
+        keywords = [w for w in re.split(r"[，。、；：\s及与和或的]+", req_text) if len(w) >= 2]
         matched = sum(1 for kw in keywords if kw in content)
         coverage = matched / max(len(keywords), 1)
         if coverage < 0.3:
